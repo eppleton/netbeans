@@ -29,6 +29,7 @@ import org.netbeans.modules.java.mcp.server.tools.FindImplementationsTool;
 import org.netbeans.modules.java.mcp.server.tools.FindSymbolTool;
 import org.netbeans.modules.java.mcp.server.tools.FindUsagesTool;
 import org.netbeans.modules.java.mcp.server.tools.OutlineTool;
+import org.netbeans.modules.java.mcp.server.tools.RenameTool;
 import org.netbeans.modules.java.mcp.server.tools.WorkspaceStatusTool;
 import org.netbeans.spi.sendopts.Arg;
 import org.netbeans.spi.sendopts.ArgsProcessor;
@@ -85,6 +86,7 @@ public final class McpArgsProcessor implements ArgsProcessor {
                 new FindImplementationsTool(ws),
                 new OutlineTool(ws),
                 new DiagnosticsTool(ws),
+                new RenameTool(ws),
                 new WorkspaceStatusTool(ws)));
         try {
             server.run();

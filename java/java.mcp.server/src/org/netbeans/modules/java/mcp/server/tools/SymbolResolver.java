@@ -49,8 +49,11 @@ final class SymbolResolver {
      * @param signature canonical symbol string, in the same syntax agents use as input
      * @param kind element kind, e.g. METHOD
      * @param file source file declaring the symbol
+     * @param simpleName simple name of the element, e.g. {@code save} or {@code Order}
+     * @param topLevelType whether the element is a top-level type (declared directly in its file)
      */
-    record Resolved(TreePathHandle handle, String signature, ElementKind kind, FileObject file) {
+    record Resolved(TreePathHandle handle, String signature, ElementKind kind, FileObject file,
+            String simpleName, boolean topLevelType) {
     }
 
     /** Resolution failed in a way the agent can fix; the message says how. */
@@ -112,7 +115,9 @@ final class SymbolResolver {
                 }
                 target = candidates.get(0);
             }
-            result.set(new Resolved(TreePathHandle.create(target, cc), signature(target, cc), target.getKind(), file));
+            result.set(new Resolved(TreePathHandle.create(target, cc), signature(target, cc), target.getKind(), file,
+                    target.getSimpleName().toString(),
+                    target instanceof TypeElement te && !te.getNestingKind().isNested()));
         }, true);
         if (result.get() == null) {
             throw new ResolutionException(problem.get() != null ? problem.get() : "Cannot resolve " + spec);

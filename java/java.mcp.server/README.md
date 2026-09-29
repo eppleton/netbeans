@@ -34,6 +34,7 @@ index and refactoring engine the IDE and the Java LSP server use.
 | `find_implementations` | Subtypes of a type (all or direct) or overriding methods of a method |
 | `outline` | Members of a type or file: modifiers, canonical signatures, declared types, line numbers |
 | `diagnostics` | Compile errors (optionally warnings) of given files or the whole workspace, without a build |
+| `rename` | Renames a type, method or field with the refactoring engine; writes to disk, returns a unified diff |
 | `workspace_status` | Opened projects, source roots, indexing state |
 
 Symbols are addressed by name, not by cursor position:
