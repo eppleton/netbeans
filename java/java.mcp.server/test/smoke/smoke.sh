@@ -198,6 +198,7 @@ FROM_NB=$SMOKE_DIR/from-nb.fifo
 rm -f "$TO_NB" "$FROM_NB"
 mkfifo "$TO_NB" "$FROM_NB"
 "$NB" --nogui --nosplash -J-Djava.awt.headless=true \
+    -J-Duser.language=en -J-Duser.country=US \
     --jdkhome "$JDK_HOME" \
     --userdir "$SMOKE_DIR/userdir" --cachedir "$SMOKE_DIR/cache" \
     --start-mcp-server --mcp-workspace "$PROJECT" \
@@ -287,6 +288,9 @@ request tools/list
 expect '"name":"find_symbol"'
 expect '"name":"find_usages"'
 expect '"name":"workspace_status"'
+expect '"name":"find_implementations"'
+expect '"name":"outline"'
+expect '"name":"diagnostics"'
 
 echo "--- waiting for the workspace to be ready (up to ${READY_TIMEOUT}s)"
 START=$(date +%s)
@@ -314,6 +318,23 @@ expect 'com.acme.shop.InvoicePayment'
 tool find_symbol '{"query":"Line"}'
 expect 'com.acme.shop.Order.Line'
 
+tool find_symbol '{"query":"Order#add"}'
+expect 'com.acme.shop.Order#addLine(java.lang.String)  method  src/main/java/com/acme/shop/Order.java:20'
+expect 'com.acme.shop.Order#addLine(java.lang.String,int)'
+expect 'com.acme.shop.Order#addLine(com.acme.shop.Order.Line)'
+
+tool find_symbol '{"query":"*Payment*#pay"}'
+expect 'com.acme.shop.CardPayment#pay(com.acme.shop.Order)'
+expect 'com.acme.shop.InvoicePayment#pay(com.acme.shop.Order)'
+expect 'com.acme.shop.PaymentService#pay(com.acme.shop.Order)'
+
+tool find_symbol '{"query":"Checkout#<init>"}'
+expect 'com.acme.shop.Checkout#<init>(com.acme.shop.PaymentService)  constructor'
+expect 'com.acme.shop.CheckoutTest#<init>()  constructor  src/test/java/com/acme/shop/CheckoutTest.java  (implicit)'
+
+tool find_symbol '{"query":"Order#nope"}'
+expect 'No members matching'
+
 # overloads must be told apart: only the (String,int) calls
 tool find_usages '{"symbol":"com.acme.shop.Order#addLine(String,int)"}'
 expect '"isError":false'
@@ -338,12 +359,58 @@ expect 'CheckoutTest.java'
 tool find_usages '{"symbol":"com.acme.shop.Nope"}'
 expect '"isError":true'
 
-# --- 4. an edit on disk shows up in the next call ------------------------------
+tool find_implementations '{"symbol":"com.acme.shop.PaymentService"}'
+expect '"isError":false'
+expect 'CardPayment.java'
+expect 'InvoicePayment.java'
+
+tool find_implementations '{"symbol":"com.acme.shop.PaymentService#pay"}'
+expect '2 implementations'
+expect 'CardPayment.java'
+expect 'InvoicePayment.java'
+
+tool find_implementations '{"symbol":"com.acme.shop.Order#lines"}'
+expect '"isError":true'
+
+tool outline '{"symbol":"com.acme.shop.Order"}'
+expect '"isError":false'
+expect 'class com.acme.shop.Order'
+expect 'public method com.acme.shop.Order#addLine(java.lang.String) : Order'
+expect 'public static class com.acme.shop.Order.Line'
+expect 'private final field com.acme.shop.Order#lines : List<Order.Line>'
+expect 'public constructor com.acme.shop.Order#<init>()  (implicit)'
+
+tool outline '{"file":"src/main/java/com/acme/shop/CardPayment.java"}'
+expect 'class com.acme.shop.CardPayment implements PaymentService'
+expect 'public method com.acme.shop.CardPayment#pay(com.acme.shop.Order) : boolean'
+
+tool outline '{"symbol":"com.acme.shop.Order#total"}'
+expect '"isError":true'
+
+tool diagnostics '{}'
+expect 'No compile errors in the workspace'
+
+tool diagnostics '{"files":["src/main/java/com/acme/shop/Checkout.java","src/main/java/Missing.java"],"include_warnings":true}'
+expect '"isError":false'
+expect 'not found: src/main/java/Missing.java'
+
+# --- 4. edits on disk show up in the next call --------------------------------
 
 echo "--- appending a usage to Checkout.java"
 echo 'class ExtraUsage { Order o = new Order().addLine("added-by-smoke-test", 7); }' >> "$PKG/Checkout.java"
 tool find_usages '{"symbol":"com.acme.shop.Order#addLine(String,int)"}'
 expect 'added-by-smoke-test'
+
+echo "--- appending a compile error to Checkout.java"
+echo 'class Broken { void x() { new Order().addLin("typo"); } }' >> "$PKG/Checkout.java"
+tool diagnostics '{}'
+expect '1 error in 1 file'
+expect 'src/main/java/com/acme/shop/Checkout.java'
+expect '16:39 error: cannot find symbol'
+expect 'symbol:   method addLin(String)'
+
+tool diagnostics '{"files":["src/test/java/com/acme/shop/CheckoutTest.java"]}'
+expect 'No errors in 1 file'
 
 cleanup
 if [ "$FAILURES" -eq 0 ]; then

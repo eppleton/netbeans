@@ -31,6 +31,9 @@ index and refactoring engine the IDE and the Java LSP server use.
 |---|---|
 | `find_symbol` | Types declared in the workspace by prefix, glob or partially qualified name |
 | `find_usages` | Semantic references to a type, method, constructor or field (`WhereUsedQuery`) |
+| `find_implementations` | Subtypes of a type (all or direct) or overriding methods of a method |
+| `outline` | Members of a type or file: modifiers, canonical signatures, declared types, line numbers |
+| `diagnostics` | Compile errors (optionally warnings) of given files or the whole workspace, without a build |
 | `workspace_status` | Opened projects, source roots, indexing state |
 
 Symbols are addressed by name, not by cursor position:
@@ -47,6 +50,7 @@ Build the IDE (or just the Java cluster), then start NetBeans headless:
 
 ```sh
 nbbuild/netbeans/bin/netbeans --nogui --nosplash \
+    -J-Djava.awt.headless=true -J-Duser.language=en -J-Duser.country=US \
     --jdkhome /path/to/jdk-17+ \
     --userdir  ~/.cache/nb-mcp/myproject/userdir \
     --cachedir ~/.cache/nb-mcp/myproject/cache \
@@ -61,6 +65,8 @@ nbbuild/netbeans/bin/netbeans --nogui --nosplash \
 * The cache directory holds the index; keep it between runs so only the first start is slow.
 * `--mcp-workspace` may be a project or a folder containing projects; it defaults to the
   current directory.
+* `-J-Duser.language=en -J-Duser.country=US` makes compiler messages English regardless of the
+  system locale, which is what agents expect.
 * stdout carries the protocol only. Logs go to stderr and `<userdir>/var/log/messages.log`.
 * NetBeans exits when the client closes stdin.
 
@@ -68,6 +74,7 @@ nbbuild/netbeans/bin/netbeans --nogui --nosplash \
 
 ```sh
 claude mcp add netbeans -- /path/to/netbeans/bin/netbeans --nogui --nosplash \
+    -J-Djava.awt.headless=true -J-Duser.language=en -J-Duser.country=US \
     --userdir ~/.cache/nb-mcp/myproject/userdir --cachedir ~/.cache/nb-mcp/myproject/cache \
     --start-mcp-server --mcp-workspace .
 ```
