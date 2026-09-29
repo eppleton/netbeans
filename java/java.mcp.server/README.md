@@ -55,6 +55,9 @@ nbbuild/netbeans/bin/netbeans --nogui --nosplash \
 
 * Use a **dedicated userdir per workspace**. With a userdir that is already in use,
   the launcher forwards the command line to the running instance instead of starting a new one.
+* Create `<userdir>/var/imported` before the first start. Otherwise a fresh userdir offers
+  to import the settings of an installed NetBeans, the dialog fails headless and NetBeans exits:
+  `mkdir -p <userdir>/var && touch <userdir>/var/imported`.
 * The cache directory holds the index; keep it between runs so only the first start is slow.
 * `--mcp-workspace` may be a project or a folder containing projects; it defaults to the
   current directory.
