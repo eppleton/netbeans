@@ -142,7 +142,26 @@ public class Order {
     }
 
     public int total() {
-        return lines.stream().mapToInt(l -> l.quantity * 10).sum();
+        return Pricing.withTax(lines.stream().mapToInt(l -> l.quantity * 10).sum());
+    }
+}
+EOF
+
+cat > "$PKG/Pricing.java" <<'EOF'
+package com.acme.shop;
+
+public final class Pricing {
+    public static final int TAX_PERCENT = 20;
+
+    private Pricing() {
+    }
+
+    public static int withTax(int net) {
+        return net + net * TAX_PERCENT / 100;
+    }
+
+    static int legacyRound(int value) {
+        return value / 10 * 10;
     }
 }
 EOF
@@ -292,6 +311,10 @@ expect '"name":"find_implementations"'
 expect '"name":"outline"'
 expect '"name":"diagnostics"'
 expect '"name":"rename"'
+expect '"name":"move"'
+expect '"name":"change_signature"'
+expect '"name":"safe_delete"'
+expect '"name":"inline"'
 
 echo "--- waiting for the workspace to be ready (up to ${READY_TIMEOUT}s)"
 START=$(date +%s)
@@ -432,7 +455,7 @@ expect 'Nothing was changed'
 # only the (String,int) overload, including the usage added on disk in step 4
 tool rename '{"symbol":"com.acme.shop.Order#addLine(String,int)","new_name":"addItem"}'
 expect '"isError":false'
-expect 'Renamed com.acme.shop.Order#addLine(java.lang.String,int) to addItem: 2 files changed'
+expect 'Done: rename com.acme.shop.Order#addLine(java.lang.String,int) to addItem. 2 files changed'
 expect '+        Order order = new Order().addItem(sku, quantity);'
 expect '+class ExtraUsage { Order o = new Order().addItem("added-by-smoke-test", 7); }'
 expect '+        return addItem(sku, 1);'
@@ -475,6 +498,61 @@ expect 'No compile errors in the workspace'
 echo 'class AfterRename { boolean b = new InvoicePayment().charge(new Order()); }' >> "$PKG/Checkout.java"
 tool find_usages '{"symbol":"com.acme.shop.PaymentService#charge","include_overriding":true}'
 expect 'AfterRename'
+
+# --- 6. more refactorings -----------------------------------------------------
+
+tool safe_delete '{"symbol":"com.acme.shop.Pricing#withTax(int)"}'
+expect '"isError":true'
+expect 'still used'
+expect 'src/main/java/com/acme/shop/Order.java'
+expect 'Nothing was changed'
+
+tool safe_delete '{"symbol":"com.acme.shop.Pricing#legacyRound(int)"}'
+expect '"isError":false'
+expect '-    static int legacyRound(int value) {'
+
+tool inline '{"symbol":"com.acme.shop.Pricing#TAX_PERCENT"}'
+expect '"isError":false'
+expect '+        return net + net * 20 / 100;'
+expect '-    public static final int TAX_PERCENT = 20;'
+
+tool inline '{"symbol":"com.acme.shop.Pricing#withTax(int)"}'
+expect '"isError":false'
+expect 'src/main/java/com/acme/shop/Order.java'
+expect '-    public static int withTax(int net) {'
+
+# only a private constructor is left: the class is unused and its file goes away
+tool safe_delete '{"symbol":"com.acme.shop.Pricing"}'
+expect '"isError":false'
+expect 'deleted file mode 100644'
+[ ! -f "$PKG/Pricing.java" ] || fail "Pricing.java should have been deleted"
+
+tool change_signature '{"symbol":"com.acme.shop.Checkout#buy(String,int)","parameters":[{"from":"sku"},{"name":"express","type":"boolean"}]}'
+expect '"isError":true'
+expect 'needs'
+
+tool change_signature '{"symbol":"com.acme.shop.Checkout#buy(String,int)","parameters":[{"from":"sku"},{"from":"quantity","name":"count"},{"name":"express","type":"boolean","default":"false"}]}'
+expect '"isError":false'
+expect '+    public boolean buy(String sku, int count, boolean express) {'
+expect '+        assertTrue(new Checkout(new CreditCardPayment()).buy("apple", 3, false));'
+
+tool move '{"symbol":"com.acme.shop.Order.Line","target_package":"com.acme.billing"}'
+expect '"isError":true'
+
+tool move '{"symbol":"com.acme.shop.InvoicePayment","target_package":"com.acme.billing"}'
+expect '"isError":false'
+expect 'rename from src/main/java/com/acme/shop/InvoicePayment.java'
+expect 'rename to src/main/java/com/acme/billing/InvoicePayment.java'
+expect '+package com.acme.billing;'
+expect '+import com.acme.shop.Order;'
+expect '+import com.acme.billing.InvoicePayment;'
+[ -f "$PROJECT/src/main/java/com/acme/billing/InvoicePayment.java" ] || fail "InvoicePayment.java should be in com/acme/billing"
+
+tool find_symbol '{"query":"InvoicePayment"}'
+expect 'com.acme.billing.InvoicePayment'
+
+tool diagnostics '{}'
+expect 'No compile errors in the workspace'
 
 cleanup
 if [ "$FAILURES" -eq 0 ]; then

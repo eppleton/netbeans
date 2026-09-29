@@ -69,6 +69,20 @@ Learned on the way:
   (`cp -Rc nbbuild/netbeans <dir>`, then `ant ... -Dnetbeans.dest.dir=<dir>` for both `netbeans` and `test`;
   delete stale duplicate jars like `asm-9.10.jar` in the clone if the harness complains).
 
+**M3 done** (`move`, `change_signature`, `safe_delete`, `inline`; 11 tools in total). Findings:
+- All refactoring tools go through `RefactoringRunner` (checks, snapshot, `doRefactoring(true)`, reindex,
+  diff). Each tool only builds its refactoring and, if files move, says where to find them.
+- `SafeDeleteRefactoringPlugin` reports remaining references only as a *non-fatal* problem with details
+  (the IDE dialog stops there, the API would delete anyway). `safe_delete` runs its own `WhereUsedQuery`
+  first and ignores usages inside the element (own span / own file); the runner also treats any problem
+  with `getDetails() != null` as blocking.
+- `move` targets a package folder URL (created by the refactoring if missing), like the LSP server's
+  `MoveRefactoring`; `MoveRefactoring(Lookups.fixed(file))` moves the whole file.
+- `change_signature` keeps parameter types exactly as written in the source (read from the tree), so
+  the refactoring does not rewrite them to qualified names; new parameters need a default for callers.
+- NetBeans' inline substitutes an argument for every use of the parameter (the expression may then be
+  evaluated twice) and can emit a spurious "not accessible" warning; the tool description warns about it.
+
 ## Build, run, test
 
 ```sh
