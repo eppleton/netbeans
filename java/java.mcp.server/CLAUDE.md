@@ -24,7 +24,8 @@ Done and verified by compilation + unit tests + a stdio protocol smoke test:
 - `McpArgsProcessor`: `--start-mcp-server [stdio] --mcp-workspace <dir>`, redirects `System.out` to stderr, exits NetBeans when stdin closes.
 - `McpServer`: hand-written MCP (JSON-RPC 2.0, newline-delimited, stdio) on json_simple. Tools capability only.
 - `Workspace`: opens projects like `java.lsp.server`'s `Server.asyncOpenSelectedProjects1` (priming build, contained projects, `OpenProjects`, wait for scan); refreshes the folder and waits for scans before each tool call.
-- Tools: `find_symbol` (ClassIndex), `find_usages` (WhereUsedQuery), `workspace_status`.
+- Tools: `find_symbol` (ClassIndex; `Type#member` parses only the matching types' files), `find_usages` and
+  `find_implementations` (WhereUsedQuery, shared in `WhereUsed`), `outline`, `diagnostics`, `workspace_status`.
 - `SymbolSpec` / `SymbolResolver`: symbol syntax `com.acme.Foo`, `com.acme.Foo.Inner`, `com.acme.Foo#bar(String,int)`, `com.acme.Foo#<init>()`, `com.acme.Foo#field`. Tools output canonical signatures in the same syntax so agents can copy them.
 
 **M0 done**: `test/smoke/smoke.sh` runs the server headless end to end and passes
@@ -37,6 +38,21 @@ Learned on the way:
 - `--start-mcp-server --mcp-workspace <dir>` parses as intended (optional argument defaults to `stdio`).
 - json_simple escapes `/` as `\/` in output; valid JSON, but grep-based checks must account for it.
 - macOS ships bash 3.2: no `coproc`, so smoke.sh talks to the server through FIFOs.
+
+**M1 done** (smoke test covers every tool). Decisions and findings:
+- `diagnostics` without `files` asks `ErrorsCache.getAllFilesInError` (public, parsing.indexing) which
+  files the index marked as broken and runs `ErrorProvider` (api.lsp, via MimeLookup `text/x-java`,
+  implemented in java.hints) only on those. Fast for any workspace size, and since every call refreshes
+  and waits for the scan, a separate "changed since last call" mode was unnecessary.
+- `ErrorProvider` offsets are document offsets (line ends normalized to `\n`); `DiagnosticsTool.LineIndex`
+  maps them the same way. javac reports "cannot find symbol" at the identifier, not the dot.
+- Compiler messages follow the JVM locale; pass `-J-Duser.language=en -J-Duser.country=US` (README,
+  smoke.sh; the M5 launcher should default to it).
+- Line numbers of declarations are the start of the declaration including annotations (`@Override`
+  line). Implicit members (default constructors, ...) have origin `MANDATED` and are shown as `(implicit)`
+  without a line.
+- `SourcePositions.getStartPosition(CompilationUnitTree, Tree)` is deprecated in the nb-javac we build
+  against but its replacement is not in the API jar; `SymbolResolver.line` suppresses the warning.
 
 ## Build, run, test
 
