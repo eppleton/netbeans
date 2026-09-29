@@ -15,7 +15,8 @@ transformations (Jackpot).
 
 ## Where we are
 
-Module scaffold lives here, in a checkout of apache/netbeans on branch `mcp-server`.
+Module scaffold lives here, in a checkout of apache/netbeans on branch `mcp-server`
+(our fork's working branch, based on apache/netbeans master; rebase onto master, don't merge).
 The only change outside the module is one line registering it in
 `nbbuild/cluster.properties` (java cluster). Read `README.md` for usage.
 
@@ -26,7 +27,16 @@ Done and verified by compilation + unit tests + a stdio protocol smoke test:
 - Tools: `find_symbol` (ClassIndex), `find_usages` (WhereUsedQuery), `workspace_status`.
 - `SymbolSpec` / `SymbolResolver`: symbol syntax `com.acme.Foo`, `com.acme.Foo.Inner`, `com.acme.Foo#bar(String,int)`, `com.acme.Foo#<init>()`, `com.acme.Foo#field`. Tools output canonical signatures in the same syntax so agents can copy them.
 
-**Never run end-to-end yet.** Milestone 0 is making it actually work headless.
+**M0 done**: `test/smoke/smoke.sh` runs the server headless end to end and passes
+(overloads told apart, overriding methods, implicit constructors, nested classes, test
+sources, an `echo >>` edit picked up by the next call, NetBeans exits when stdin closes).
+Learned on the way:
+- A fresh userdir makes the launcher's `AutoUpgrade` offer to import settings of an installed
+  NetBeans; the dialog throws `HeadlessException` and NetBeans exits with status 0 before
+  the server starts. Create `<userdir>/var/imported` first (smoke.sh does; the M5 launcher must).
+- `--start-mcp-server --mcp-workspace <dir>` parses as intended (optional argument defaults to `stdio`).
+- json_simple escapes `/` as `\/` in output; valid JSON, but grep-based checks must account for it.
+- macOS ships bash 3.2: no `coproc`, so smoke.sh talks to the server through FIFOs.
 
 ## Build, run, test
 
@@ -40,7 +50,10 @@ nbbuild/netbeans/bin/netbeans --nogui --nosplash \
     --start-mcp-server --mcp-workspace <maven-project>
 ```
 
+- End-to-end check: `java/java.mcp.server/test/smoke/smoke.sh` (generates a Maven project under
+  `$SMOKE_DIR`, default `$TMPDIR/nbmcp-smoke`; prints every request/response; exit code 0 = pass).
 - Use a dedicated userdir; otherwise the launcher forwards the command line to a running NetBeans.
+  Touch `<userdir>/var/imported` before the first start (see M0 notes above).
 - Logs: stderr and `<userdir>/var/log/messages.log`.
 - JDK 17+ required (`--jdkhome` if needed).
 
