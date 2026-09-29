@@ -232,6 +232,19 @@ public final class Workspace {
         return roots;
     }
 
+    /**
+     * Finds a file given relative to the workspace root or as an absolute path.
+     *
+     * @return the file, or {@code null} if it does not exist
+     */
+    public FileObject findFile(String path) {
+        File f = new File(path);
+        if (!f.isAbsolute()) {
+            f = new File(root, path);
+        }
+        return FileUtil.toFileObject(FileUtil.normalizeFile(f));
+    }
+
     /** Returns the path of a file relative to the workspace, or its absolute path outside of it. */
     public String displayPath(FileObject fo) {
         FileObject rootFo = FileUtil.toFileObject(root);

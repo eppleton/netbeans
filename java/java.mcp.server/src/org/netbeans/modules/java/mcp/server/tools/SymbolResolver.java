@@ -18,6 +18,8 @@
  */
 package org.netbeans.modules.java.mcp.server.tools;
 
+import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.Tree;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -165,6 +167,22 @@ final class SymbolResolver {
 
     private static String signatures(List<Element> elements, CompilationInfo info) {
         return elements.stream().map(e -> signature(e, info)).collect(Collectors.joining(", "));
+    }
+
+    /**
+     * Line (1-based) where an element is declared in the compilation unit of
+     * {@code info}, or 0 if it has no source position there.
+     */
+    // the replacement of getStartPosition(CompilationUnitTree, Tree) is not in the javac API we build against
+    @SuppressWarnings("deprecation")
+    static int line(CompilationInfo info, Element e) {
+        Tree tree = info.getTrees().getTree(e);
+        if (tree == null) {
+            return 0;
+        }
+        CompilationUnitTree cu = info.getCompilationUnit();
+        long pos = info.getTrees().getSourcePositions().getStartPosition(cu, tree);
+        return pos < 0 ? 0 : (int) cu.getLineMap().getLineNumber(pos);
     }
 
     /** Canonical symbol string of an element, in the syntax {@link SymbolSpec} parses. */

@@ -19,9 +19,9 @@
 package org.netbeans.modules.java.mcp.server.tools;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import javax.lang.model.element.ElementKind;
 import org.netbeans.modules.java.mcp.server.Json;
 import org.netbeans.modules.java.mcp.server.Tool;
 import org.netbeans.modules.java.mcp.server.Workspace;
@@ -30,32 +30,32 @@ import org.netbeans.modules.refactoring.java.api.WhereUsedQueryConstants;
 import org.openide.filesystems.FileObject;
 
 /**
- * Finds references to a type, method, constructor or field using the Java
+ * Finds subtypes of a type or overriding methods of a method using the Java
  * refactoring engine ({@link WhereUsedQuery}).
  */
-public final class FindUsagesTool implements Tool {
+public final class FindImplementationsTool implements Tool {
 
     private static final int DEFAULT_LIMIT = 200;
 
     private final Workspace workspace;
 
-    public FindUsagesTool(Workspace workspace) {
+    public FindImplementationsTool(Workspace workspace) {
         this.workspace = workspace;
     }
 
     @Override
     public String name() {
-        return "find_usages";
+        return "find_implementations";
     }
 
     @Override
     public String description() {
-        return "Find all references to a Java type, method, constructor or field in the workspace, "
-                + "resolved semantically: overloads, same-named members of other types, comments and "
-                + "strings are not confused with real usages. Use this instead of grep before changing "
-                + "or removing an API. Symbol syntax: com.acme.Foo, com.acme.Foo#bar(String,int), "
-                + "com.acme.Foo#<init>(), com.acme.Foo#field. Parameter types may be omitted when the "
-                + "method name is not overloaded. Output: usages grouped by file as 'line: source line'.";
+        return "Find the implementations of a Java interface or class (all subtypes, also indirect ones) "
+                + "or of a method (all overriding methods) in the workspace. Use this instead of grepping "
+                + "for 'implements'/'extends' or method names, e.g. before changing an interface method. "
+                + "Symbol syntax: com.acme.Foo, com.acme.Foo#bar(String,int); parameter types may be omitted "
+                + "when the method name is not overloaded. Output: declarations grouped by file as "
+                + "'line: source line'.";
     }
 
     @Override
@@ -64,11 +64,11 @@ public final class FindUsagesTool implements Tool {
                 "type", "object",
                 "properties", Json.obj(
                         "symbol", Json.obj("type", "string",
-                                "description", "Fully qualified symbol, e.g. com.acme.OrderService#save(Order)"),
-                        "include_overriding", Json.obj("type", "boolean",
-                                "description", "For methods: also report usages of overriding methods. Default false."),
+                                "description", "Fully qualified type or method, e.g. com.acme.PaymentService#pay(Order)"),
+                        "direct_only", Json.obj("type", "boolean",
+                                "description", "For types: only direct subtypes. Default false."),
                         "limit", Json.obj("type", "integer",
-                                "description", "Maximum usages listed, default " + DEFAULT_LIMIT)),
+                                "description", "Maximum results listed, default " + DEFAULT_LIMIT)),
                 "required", List.of("symbol"));
     }
 
@@ -84,7 +84,7 @@ public final class FindUsagesTool implements Tool {
         } catch (IllegalArgumentException ex) {
             return Result.error(ex.getMessage());
         }
-        boolean includeOverriding = Json.bool(arguments, "include_overriding", false);
+        boolean directOnly = Json.bool(arguments, "direct_only", false);
         int limit = Json.integer(arguments, "limit", DEFAULT_LIMIT);
 
         List<FileObject> roots;
@@ -97,10 +97,18 @@ public final class FindUsagesTool implements Tool {
         }
 
         WhereUsedQuery query = WhereUsed.query(symbol, roots);
-        query.putValue(WhereUsedQuery.FIND_REFERENCES, true);
-        if (includeOverriding && symbol.kind() == ElementKind.METHOD) {
-            query.putValue(WhereUsedQueryConstants.FIND_OVERRIDING_METHODS, true);
+        query.putValue(WhereUsedQuery.FIND_REFERENCES, false);
+        switch (symbol.kind()) {
+            case CLASS, INTERFACE, ENUM, RECORD, ANNOTATION_TYPE ->
+                query.putValue(directOnly ? WhereUsedQueryConstants.FIND_DIRECT_SUBCLASSES
+                        : WhereUsedQueryConstants.FIND_SUBCLASSES, true);
+            case METHOD ->
+                query.putValue(WhereUsedQueryConstants.FIND_OVERRIDING_METHODS, true);
+            default -> {
+                return Result.error(symbol.signature() + " is a " + symbol.kind().name().toLowerCase(Locale.ROOT)
+                        + "; implementations exist only for types and methods. Use find_usages instead.");
+            }
         }
-        return WhereUsed.run(workspace, query, symbol.signature(), "usage", limit);
+        return WhereUsed.run(workspace, query, symbol.signature(), "implementation", limit);
     }
 }
