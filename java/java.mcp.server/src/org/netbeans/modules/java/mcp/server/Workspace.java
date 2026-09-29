@@ -235,6 +235,9 @@ public final class Workspace {
     /** Returns the path of a file relative to the workspace, or its absolute path outside of it. */
     public String displayPath(FileObject fo) {
         FileObject rootFo = FileUtil.toFileObject(root);
+        if (fo.equals(rootFo)) {
+            return ".";
+        }
         String rel = rootFo != null ? FileUtil.getRelativePath(rootFo, fo) : null;
         return rel != null ? rel : fo.getPath();
     }
