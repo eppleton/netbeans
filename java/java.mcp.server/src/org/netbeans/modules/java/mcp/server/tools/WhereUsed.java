@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Predicate;
 import org.netbeans.api.queries.FileEncodingQuery;
 import org.netbeans.modules.java.mcp.server.Tool.Result;
 import org.netbeans.modules.java.mcp.server.Workspace;
@@ -60,6 +61,24 @@ final class WhereUsed {
      * @param noun what one result is, e.g. "usage"; pluralized by appending "s"
      */
     static Result run(Workspace workspace, WhereUsedQuery query, String signature, String noun, int limit) throws IOException {
+        Found found = find(workspace, query, signature, noun, limit, re -> true);
+        return found.error() ? Result.error(found.text()) : Result.ok(found.text());
+    }
+
+    /**
+     * Result of a search.
+     *
+     * @param total number of found locations
+     * @param text the listing, or the error message if {@code error}
+     */
+    record Found(int total, String text, boolean error) {
+    }
+
+    /**
+     * Runs the query and formats the results that pass {@code filter}.
+     */
+    static Found find(Workspace workspace, WhereUsedQuery query, String signature, String noun, int limit,
+            Predicate<RefactoringElement> filter) throws IOException {
         RefactoringSession session = RefactoringSession.create("MCP " + noun + "s");
         try {
             Problem p = firstFatal(query.preCheck());
@@ -70,9 +89,9 @@ final class WhereUsed {
                 p = firstFatal(query.prepare(session));
             }
             if (p != null) {
-                return Result.error("Search for " + noun + "s of " + signature + " failed: " + p.getMessage());
+                return new Found(0, "Search for " + noun + "s of " + signature + " failed: " + p.getMessage(), true);
             }
-            return Result.ok(format(workspace, session, signature, noun, limit));
+            return format(workspace, session, signature, noun, limit, filter);
         } finally {
             session.finished();
         }
@@ -87,14 +106,15 @@ final class WhereUsed {
         return null;
     }
 
-    private static String format(Workspace workspace, RefactoringSession session, String signature, String noun, int limit) throws IOException {
+    private static Found format(Workspace workspace, RefactoringSession session, String signature, String noun, int limit,
+            Predicate<RefactoringElement> filter) throws IOException {
         // file -> line -> source line; TreeMaps keep output stable and sorted
         Map<String, TreeMap<Integer, String>> byFile = new TreeMap<>();
         Map<FileObject, List<String>> lineCache = new HashMap<>();
         int total = 0;
         for (RefactoringElement re : session.getRefactoringElements()) {
             FileObject file = re.getParentFile();
-            if (file == null || !file.isData() || re.getPosition() == null) {
+            if (file == null || !file.isData() || re.getPosition() == null || !filter.test(re)) {
                 continue;
             }
             int line = re.getPosition().getBegin().getLine();
@@ -105,7 +125,7 @@ final class WhereUsed {
             }
         }
         if (total == 0) {
-            return "No " + noun + "s of " + signature + " in the workspace.";
+            return new Found(0, "No " + noun + "s of " + signature + " in the workspace.", false);
         }
         StringBuilder sb = new StringBuilder();
         sb.append(total).append(' ').append(noun).append(total == 1 ? "" : "s").append(" of ").append(signature)
@@ -123,7 +143,7 @@ final class WhereUsed {
                 sb.append("  ").append(l.getKey()).append(": ").append(l.getValue()).append('\n');
             }
         }
-        return sb.toString();
+        return new Found(total, sb.toString(), false);
     }
 
     static List<String> readLines(FileObject fo) {

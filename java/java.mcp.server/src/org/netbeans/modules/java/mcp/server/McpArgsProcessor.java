@@ -24,12 +24,16 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.List;
 import org.netbeans.api.sendopts.CommandException;
+import org.netbeans.modules.java.mcp.server.tools.ChangeSignatureTool;
 import org.netbeans.modules.java.mcp.server.tools.DiagnosticsTool;
 import org.netbeans.modules.java.mcp.server.tools.FindImplementationsTool;
 import org.netbeans.modules.java.mcp.server.tools.FindSymbolTool;
 import org.netbeans.modules.java.mcp.server.tools.FindUsagesTool;
+import org.netbeans.modules.java.mcp.server.tools.InlineTool;
+import org.netbeans.modules.java.mcp.server.tools.MoveTool;
 import org.netbeans.modules.java.mcp.server.tools.OutlineTool;
 import org.netbeans.modules.java.mcp.server.tools.RenameTool;
+import org.netbeans.modules.java.mcp.server.tools.SafeDeleteTool;
 import org.netbeans.modules.java.mcp.server.tools.WorkspaceStatusTool;
 import org.netbeans.spi.sendopts.Arg;
 import org.netbeans.spi.sendopts.ArgsProcessor;
@@ -87,6 +91,10 @@ public final class McpArgsProcessor implements ArgsProcessor {
                 new OutlineTool(ws),
                 new DiagnosticsTool(ws),
                 new RenameTool(ws),
+                new MoveTool(ws),
+                new ChangeSignatureTool(ws),
+                new SafeDeleteTool(ws),
+                new InlineTool(ws),
                 new WorkspaceStatusTool(ws)));
         try {
             server.run();

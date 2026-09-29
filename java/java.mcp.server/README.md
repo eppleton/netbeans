@@ -35,6 +35,13 @@ index and refactoring engine the IDE and the Java LSP server use.
 | `outline` | Members of a type or file: modifiers, canonical signatures, declared types, line numbers |
 | `diagnostics` | Compile errors (optionally warnings) of given files or the whole workspace, without a build |
 | `rename` | Renames a type, method or field with the refactoring engine; writes to disk, returns a unified diff |
+| `move` | Moves a top-level class to another package, updating package declaration, imports and references |
+| `change_signature` | Adds, removes, reorders, renames or retypes parameters, or changes name, return type or visibility of a method; updates callers and overriders |
+| `safe_delete` | Deletes a type or member only if it is unused; otherwise lists the blocking usages |
+| `inline` | Inlines a method or constant into all usages and removes it |
+
+All refactoring tools write their changes to disk and return warnings plus a unified diff (`git diff`
+format). Fatal problems stop them before anything changes.
 | `workspace_status` | Opened projects, source roots, indexing state |
 
 Symbols are addressed by name, not by cursor position:

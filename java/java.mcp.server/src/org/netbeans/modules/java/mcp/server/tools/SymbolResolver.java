@@ -190,6 +190,19 @@ final class SymbolResolver {
         return pos < 0 ? 0 : (int) cu.getLineMap().getLineNumber(pos);
     }
 
+    /**
+     * Start and end offset of a tree in the compilation unit of {@code info},
+     * or {@code null} if it has no source position.
+     */
+    // the replacements of the (CompilationUnitTree, Tree) methods are not in the javac API we build against
+    @SuppressWarnings("deprecation")
+    static int[] span(CompilationInfo info, Tree tree) {
+        CompilationUnitTree cu = info.getCompilationUnit();
+        long start = info.getTrees().getSourcePositions().getStartPosition(cu, tree);
+        long end = info.getTrees().getSourcePositions().getEndPosition(cu, tree);
+        return start < 0 || end < start ? null : new int[]{(int) start, (int) end};
+    }
+
     /** Canonical symbol string of an element, in the syntax {@link SymbolSpec} parses. */
     static String signature(Element e, CompilationInfo info) {
         if (e instanceof TypeElement te) {
