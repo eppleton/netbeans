@@ -83,6 +83,19 @@ public class UnifiedDiffTest {
     }
 
     @Test
+    public void deletedFile() {
+        assertEquals("""
+                diff --git a/p/Gone.java b/p/Gone.java
+                deleted file mode 100644
+                --- a/p/Gone.java
+                +++ /dev/null
+                @@ -1,2 +0,0 @@
+                -class Gone {
+                -}
+                """, UnifiedDiff.deletion("p/Gone.java", "class Gone {\n}\n"));
+    }
+
+    @Test
     public void renameWithAndWithoutChanges() {
         assertEquals("""
                 diff --git a/p/Old.java b/p/New.java

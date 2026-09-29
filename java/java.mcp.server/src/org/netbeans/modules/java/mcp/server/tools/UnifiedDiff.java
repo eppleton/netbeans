@@ -68,6 +68,21 @@ final class UnifiedDiff {
         return sb.toString();
     }
 
+    /** Diff of a deleted file. */
+    static String deletion(String path, String oldText) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("diff --git a/").append(path).append(" b/").append(path).append('\n');
+        sb.append("deleted file mode 100644\n");
+        if (!oldText.isEmpty()) {
+            sb.append("--- a/").append(path).append('\n');
+            sb.append("+++ /dev/null\n");
+            Text a = new Text(oldText);
+            Text b = new Text("");
+            hunks(a, b, edits(a.keys, b.keys), sb);
+        }
+        return sb.toString();
+    }
+
     /** Lines of a text; remembers whether the last line ends with a line break. */
     private static final class Text {
 

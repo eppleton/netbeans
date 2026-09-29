@@ -18,24 +18,14 @@
  */
 package org.netbeans.modules.java.mcp.server.tools;
 
-import java.io.IOException;
-import java.net.URL;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import javax.lang.model.SourceVersion;
-import org.netbeans.api.queries.FileEncodingQuery;
 import org.netbeans.modules.java.mcp.server.Json;
 import org.netbeans.modules.java.mcp.server.Tool;
 import org.netbeans.modules.java.mcp.server.Workspace;
-import org.netbeans.modules.parsing.api.indexing.IndexingManager;
-import org.netbeans.modules.refactoring.api.Problem;
-import org.netbeans.modules.refactoring.api.RefactoringElement;
-import org.netbeans.modules.refactoring.api.RefactoringSession;
 import org.netbeans.modules.refactoring.api.RenameRefactoring;
 import org.netbeans.modules.refactoring.java.api.JavaRefactoringUtils;
 import org.openide.filesystems.FileObject;
@@ -46,8 +36,6 @@ import org.openide.util.lookup.Lookups;
  * reports the changes as a unified diff. The files are changed on disk.
  */
 public final class RenameTool implements Tool {
-
-    private static final int DEFAULT_MAX_DIFF_LINES = 400;
 
     private final Workspace workspace;
 
@@ -82,13 +70,9 @@ public final class RenameTool implements Tool {
                         "new_name", Json.obj("type", "string",
                                 "description", "New simple name, e.g. store (not qualified)"),
                         "max_diff_lines", Json.obj("type", "integer",
-                                "description", "Maximum diff lines returned, default " + DEFAULT_MAX_DIFF_LINES
+                                "description", "Maximum diff lines returned, default " + RefactoringRunner.DEFAULT_MAX_DIFF_LINES
                                 + "; the rename itself is always complete")),
                 "required", List.of("symbol", "new_name"));
-    }
-
-    /** Path and content of a file before the refactoring. */
-    private record Before(String path, URL url, String text) {
     }
 
     @Override
@@ -101,7 +85,7 @@ public final class RenameTool implements Tool {
         if (!SourceVersion.isIdentifier(newName) || SourceVersion.isKeyword(newName)) {
             return Result.error("'" + newName + "' is not a valid Java identifier. Give the new simple name only.");
         }
-        int maxDiffLines = Json.integer(arguments, "max_diff_lines", DEFAULT_MAX_DIFF_LINES);
+        int maxDiffLines = Json.integer(arguments, "max_diff_lines", RefactoringRunner.DEFAULT_MAX_DIFF_LINES);
         SymbolSpec spec;
         try {
             spec = SymbolSpec.parse(symbolText);
@@ -140,160 +124,11 @@ public final class RenameTool implements Tool {
         refactoring.getContext().add(JavaRefactoringUtils.getClasspathInfoFor(symbol.file()));
         refactoring.setNewName(newName);
 
-        RefactoringSession session = RefactoringSession.create("MCP rename");
-        try {
-            // plugins often report the same problem once per element
-            Set<String> warnings = new LinkedHashSet<>();
-            Problem fatal = collect(refactoring.checkParameters(), warnings);
-            if (fatal == null) {
-                fatal = collect(refactoring.preCheck(), warnings);
-            }
-            if (fatal == null) {
-                fatal = collect(refactoring.prepare(session), warnings);
-            }
-            if (fatal != null) {
-                return Result.error("Cannot rename " + symbol.signature() + " to " + newName + ": "
-                        + fatal.getMessage() + warningsText(warnings) + "\nNothing was changed.");
-            }
-
-            Map<FileObject, Before> before = new LinkedHashMap<>();
-            snapshot(symbol.file(), before);
-            for (RefactoringElement re : session.getRefactoringElements()) {
-                snapshot(re.getParentFile(), before);
-            }
-            Problem commit = collect(session.doRefactoring(true), warnings);
-            List<Change> changes = changes(before, newName);
-            // the index learns about the saved files asynchronously; without this, a following
-            // call (e.g. renaming a method of a just renamed class) could see stale file names
-            reindex(roots, changes);
-            if (commit != null) {
-                return Result.error("Renaming " + symbol.signature() + " failed while applying the changes: "
-                        + commit.getMessage() + warningsText(warnings)
-                        + "\nSome files may have been changed; check with git status.");
-            }
-            if (changes.isEmpty()) {
-                return Result.error("Renaming " + symbol.signature() + " to " + newName + " changed nothing."
-                        + warningsText(warnings) + "\nDetails are in the IDE log (<userdir>/var/log/messages.log).");
-            }
-            return Result.ok(report(symbol, newName, changes, warnings, maxDiffLines));
-        } finally {
-            session.finished();
-        }
-    }
-
-    /** Adds non-fatal problems to {@code warnings}; returns the first fatal one. */
-    private static Problem collect(Problem p, Set<String> warnings) {
-        Problem fatal = null;
-        for (; p != null; p = p.getNext()) {
-            if (p.isFatal()) {
-                if (fatal == null) {
-                    fatal = p;
-                }
-            } else {
-                warnings.add(p.getMessage());
-            }
-        }
-        return fatal;
-    }
-
-    private static String warningsText(Set<String> warnings) {
-        StringBuilder sb = new StringBuilder();
-        for (String w : warnings) {
-            sb.append("\nWarning: ").append(w);
-        }
-        return sb.toString();
-    }
-
-    private void snapshot(FileObject fo, Map<FileObject, Before> into) throws IOException {
-        if (fo != null && fo.isData() && !into.containsKey(fo)) {
-            into.put(fo, new Before(workspace.displayPath(fo), fo.toURL(), read(fo)));
-        }
-    }
-
-    private static String read(FileObject fo) throws IOException {
-        return fo.asText(FileEncodingQuery.getEncoding(fo).name());
-    }
-
-    /**
-     * A changed file.
-     *
-     * @param newUrl {@code null} if the file was deleted
-     */
-    private record Change(String path, String diff, URL oldUrl, URL newUrl, boolean renamed) {
-    }
-
-    private List<Change> changes(Map<FileObject, Before> before, String newName) throws IOException {
-        List<Change> changes = new ArrayList<>();
-        for (Map.Entry<FileObject, Before> e : before.entrySet()) {
-            FileObject fo = e.getKey();
-            Before b = e.getValue();
-            if (!fo.isValid()) {
-                // the refactoring replaced the file object; look for the renamed file next to the old one
-                FileObject parent = fo.getParent();
-                FileObject renamed = parent != null ? parent.getFileObject(newName, fo.getExt()) : null;
-                if (renamed == null) {
-                    changes.add(new Change(b.path(), "deleted: " + b.path() + "\n", b.url(), null, false));
-                    continue;
-                }
-                fo = renamed;
-            }
-            String path = workspace.displayPath(fo);
-            String diff = UnifiedDiff.diff(b.path(), path, b.text(), read(fo));
-            if (!diff.isEmpty()) {
-                changes.add(new Change(path, diff, b.url(), fo.toURL(), !path.equals(b.path())));
-            }
-        }
-        return changes;
-    }
-
-    private static void reindex(List<FileObject> roots, List<Change> changes) {
-        for (FileObject root : roots) {
-            URL rootUrl = root.toURL();
-            String prefix = rootUrl.toString();
-            Set<URL> files = new LinkedHashSet<>();
-            for (Change c : changes) {
-                if (c.oldUrl().toString().startsWith(prefix)) {
-                    files.add(c.oldUrl());
-                }
-                if (c.newUrl() != null && c.newUrl().toString().startsWith(prefix)) {
-                    files.add(c.newUrl());
-                }
-            }
-            if (!files.isEmpty()) {
-                IndexingManager.getDefault().refreshIndexAndWait(rootUrl, files);
-            }
-        }
-    }
-
-    private static String report(SymbolResolver.Resolved symbol, String newName, List<Change> changes,
-            Set<String> warnings, int maxDiffLines) {
-        long renamedFiles = changes.stream().filter(Change::renamed).count();
-        StringBuilder sb = new StringBuilder();
-        sb.append("Renamed ").append(symbol.signature()).append(" to ").append(newName).append(": ")
-                .append(changes.size()).append(changes.size() == 1 ? " file" : " files").append(" changed");
-        if (renamedFiles > 0) {
-            sb.append(", ").append(renamedFiles).append(renamedFiles == 1 ? " file" : " files").append(" renamed");
-        }
-        sb.append(". The changes are saved to disk.\n");
-        for (String w : warnings) {
-            sb.append("Warning: ").append(w).append('\n');
-        }
-        sb.append('\n');
-        int lines = 0;
-        List<String> omitted = new ArrayList<>();
-        for (Change c : changes) {
-            int n = c.diff().split("\n", -1).length - 1;
-            if (lines + n > maxDiffLines && lines > 0) {
-                omitted.add(c.path());
-                continue;
-            }
-            sb.append(c.diff());
-            lines += n;
-        }
-        if (!omitted.isEmpty()) {
-            sb.append("\n... diff omitted for ").append(omitted.size()).append(omitted.size() == 1 ? " file" : " files")
-                    .append(" (raise 'max_diff_lines' or use git diff): ").append(String.join(", ", omitted)).append('\n');
-        }
-        return sb.toString();
+        return new RefactoringRunner(workspace, roots, refactoring,
+                "rename " + symbol.signature() + " to " + newName)
+                .involving(symbol.file())
+                // a renamed public class renames its file
+                .relocatingWith(fo -> fo.getParent() != null ? fo.getParent().getFileObject(newName, fo.getExt()) : null)
+                .run(maxDiffLines);
     }
 }
