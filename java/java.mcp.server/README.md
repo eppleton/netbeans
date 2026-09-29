@@ -1,0 +1,82 @@
+<!--
+
+    Licensed to the Apache Software Foundation (ASF) under one
+    or more contributor license agreements.  See the NOTICE file
+    distributed with this work for additional information
+    regarding copyright ownership.  The ASF licenses this file
+    to you under the Apache License, Version 2.0 (the
+    "License"); you may not use this file except in compliance
+    with the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing,
+    software distributed under the License is distributed on an
+    "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    KIND, either express or implied.  See the License for the
+    specific language governing permissions and limitations
+    under the License.
+
+-->
+
+# Java MCP Server (prototype)
+
+Headless [Model Context Protocol](https://modelcontextprotocol.io) server that gives
+coding agents semantic access to the NetBeans Java infrastructure: the same parser,
+index and refactoring engine the IDE and the Java LSP server use.
+
+## Tools
+
+| Tool | What it does |
+|---|---|
+| `find_symbol` | Types declared in the workspace by prefix, glob or partially qualified name |
+| `find_usages` | Semantic references to a type, method, constructor or field (`WhereUsedQuery`) |
+| `workspace_status` | Opened projects, source roots, indexing state |
+
+Symbols are addressed by name, not by cursor position:
+
+```
+com.acme.Foo                    com.acme.Foo.Inner  /  com.acme.Foo$Inner
+com.acme.Foo#count              com.acme.Foo#bar(String,int)
+com.acme.Foo#<init>()           com.acme.Foo#Foo(String)
+```
+
+## Running
+
+Build the IDE (or just the Java cluster), then start NetBeans headless:
+
+```sh
+nbbuild/netbeans/bin/netbeans --nogui --nosplash \
+    --jdkhome /path/to/jdk-17+ \
+    --userdir  ~/.cache/nb-mcp/myproject/userdir \
+    --cachedir ~/.cache/nb-mcp/myproject/cache \
+    --start-mcp-server --mcp-workspace /path/to/myproject
+```
+
+* Use a **dedicated userdir per workspace**. With a userdir that is already in use,
+  the launcher forwards the command line to the running instance instead of starting a new one.
+* The cache directory holds the index; keep it between runs so only the first start is slow.
+* `--mcp-workspace` may be a project or a folder containing projects; it defaults to the
+  current directory.
+* stdout carries the protocol only. Logs go to stderr and `<userdir>/var/log/messages.log`.
+* NetBeans exits when the client closes stdin.
+
+### Claude Code
+
+```sh
+claude mcp add netbeans -- /path/to/netbeans/bin/netbeans --nogui --nosplash \
+    --userdir ~/.cache/nb-mcp/myproject/userdir --cachedir ~/.cache/nb-mcp/myproject/cache \
+    --start-mcp-server --mcp-workspace .
+```
+
+## Design notes
+
+* The protocol layer (`McpServer`) is a small JSON-RPC-over-stdio implementation on top of
+  json_simple, so the module needs no new external libraries. Only the tools capability is
+  implemented. If more of the protocol is needed it can be replaced by the official MCP Java SDK
+  without touching the tools.
+* Projects are opened like the Java LSP server does it: priming build, contained projects,
+  `OpenProjects`, then waiting for the initial scan.
+* Before every tool call the workspace folder is refreshed and pending scans are awaited, so
+  edits the agent made on disk are reflected in the results.
+* The module uses public APIs only; no friend-list changes in other modules are required.
