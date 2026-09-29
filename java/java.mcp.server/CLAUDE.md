@@ -54,6 +54,21 @@ Learned on the way:
 - `SourcePositions.getStartPosition(CompilationUnitTree, Tree)` is deprecated in the nb-javac we build
   against but its replacement is not in the API jar; `SymbolResolver.line` suppresses the warning.
 
+**M2 done** (`rename`, option (a): public API only). Findings:
+- Lookup like `TextDocumentServiceImpl.rename`: the `TreePathHandle`, plus the `FileObject` for a top-level
+  type named like its file (renames the file); context gets `JavaRefactoringUtils.getClasspathInfoFor`.
+- `session.doRefactoring(true)` saves the modified files itself (`LifecycleManager.saveAll` + `SaveCookie`s).
+- The index learns about the saved/renamed files asynchronously. A following refactoring then got stale
+  file names from the index and the Java plugin failed with an NPE in `JavaRefactoringPlugin.groupByRoot`
+  (reported as a *non-fatal* problem, nothing renamed). Fix: `IndexingManager.refreshIndexAndWait` for the
+  old and new URLs of all touched files before returning. A rename that changes nothing is an error.
+- Plugins repeat the same warning per element; warnings are de-duplicated.
+- `UnifiedDiff` is our own Myers implementation (git-style headers, `rename from/to`, "No newline at end of
+  file"); a random test (3000 cases, `git apply` of each diff) found the end-of-file newline case.
+- While the user tests with `nbbuild/netbeans`, build into an APFS clone instead
+  (`cp -Rc nbbuild/netbeans <dir>`, then `ant ... -Dnetbeans.dest.dir=<dir>` for both `netbeans` and `test`;
+  delete stale duplicate jars like `asm-9.10.jar` in the clone if the harness complains).
+
 ## Build, run, test
 
 ```sh

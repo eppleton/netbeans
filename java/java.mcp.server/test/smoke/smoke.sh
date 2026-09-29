@@ -259,9 +259,9 @@ tool() {
     request tools/call "{\"name\":\"$1\",\"arguments\":$2}"
 }
 
-# json_simple escapes '/' as '\/'; undo that so paths can be matched literally
+# undo the JSON escaping of '/' (json_simple writes '\/') and '"' so text can be matched literally
 unescaped() {
-    printf '%s' "$RESPONSE" | sed 's#\\/#/#g'
+    printf '%s' "$RESPONSE" | sed -e 's#\\/#/#g' -e 's#\\"#"#g'
 }
 
 expect() {
@@ -291,6 +291,7 @@ expect '"name":"workspace_status"'
 expect '"name":"find_implementations"'
 expect '"name":"outline"'
 expect '"name":"diagnostics"'
+expect '"name":"rename"'
 
 echo "--- waiting for the workspace to be ready (up to ${READY_TIMEOUT}s)"
 START=$(date +%s)
@@ -340,7 +341,7 @@ tool find_usages '{"symbol":"com.acme.shop.Order#addLine(String,int)"}'
 expect '"isError":false'
 expect 'Checkout.java'
 expect 'addLine(sku, quantity)'
-expect_not 'addLine(\"pear\")'
+expect_not 'addLine("pear")'
 
 tool find_usages '{"symbol":"com.acme.shop.Order#addLine"}'
 expect '"isError":true'
@@ -411,6 +412,69 @@ expect 'symbol:   method addLin(String)'
 
 tool diagnostics '{"files":["src/test/java/com/acme/shop/CheckoutTest.java"]}'
 expect 'No errors in 1 file'
+
+# --- 5. rename ---------------------------------------------------------------
+
+echo "--- removing the compile error again"
+sed -i.bak '$d' "$PKG/Checkout.java" && rm -f "$PKG/Checkout.java.bak"
+tool diagnostics '{}'
+expect 'No compile errors in the workspace'
+
+tool rename '{"symbol":"com.acme.shop.Order#addLine(String,int)","new_name":"1bad"}'
+expect '"isError":true'
+expect 'not a valid Java identifier'
+
+tool rename '{"symbol":"com.acme.shop.CardPayment","new_name":"InvoicePayment"}'
+expect '"isError":true'
+expect 'Nothing was changed'
+[ -f "$PKG/CardPayment.java" ] || fail "a failed rename must not change files"
+
+# only the (String,int) overload, including the usage added on disk in step 4
+tool rename '{"symbol":"com.acme.shop.Order#addLine(String,int)","new_name":"addItem"}'
+expect '"isError":false'
+expect 'Renamed com.acme.shop.Order#addLine(java.lang.String,int) to addItem: 2 files changed'
+expect '+        Order order = new Order().addItem(sku, quantity);'
+expect '+class ExtraUsage { Order o = new Order().addItem("added-by-smoke-test", 7); }'
+expect '+        return addItem(sku, 1);'
+grep -q 'addLine("pear")' "$PROJECT/src/test/java/com/acme/shop/CheckoutTest.java" \
+    || fail "the addLine(String) overload must not be renamed"
+
+# the returned diff is a valid patch: applying it in reverse restores the old content
+if command -v python3 > /dev/null; then
+    printf '%s' "$RESPONSE" | python3 -c 'import json,sys; t=json.load(sys.stdin)["result"]["content"][0]["text"]; print(t[t.index("diff --git"):], end="")' \
+        > "$SMOKE_DIR/rename.patch"
+    (cd "$PROJECT" && git apply -R --check "$SMOKE_DIR/rename.patch") \
+        || fail "the rename diff does not apply in reverse"
+fi
+
+# a public class: its file is renamed too
+tool rename '{"symbol":"com.acme.shop.CardPayment","new_name":"CreditCardPayment"}'
+expect '"isError":false'
+expect 'rename from src/main/java/com/acme/shop/CardPayment.java'
+expect 'rename to src/main/java/com/acme/shop/CreditCardPayment.java'
+expect '+public class CreditCardPayment implements PaymentService {'
+expect 'src/test/java/com/acme/shop/CheckoutTest.java'
+[ -f "$PKG/CreditCardPayment.java" ] && [ ! -f "$PKG/CardPayment.java" ] \
+    || fail "CardPayment.java should have been renamed to CreditCardPayment.java"
+
+# an interface method: the implementations follow
+tool rename '{"symbol":"com.acme.shop.PaymentService#pay","new_name":"charge"}'
+expect '"isError":false'
+expect '+    boolean charge(Order order);'
+expect 'src/main/java/com/acme/shop/CreditCardPayment.java'
+expect 'src/main/java/com/acme/shop/InvoicePayment.java'
+expect '+        return payment.charge(order);'
+
+tool find_usages '{"symbol":"com.acme.shop.Order#addItem(String,int)"}'
+expect '3 usages'
+
+tool diagnostics '{}'
+expect 'No compile errors in the workspace'
+
+# an edit on disk after a refactoring must still be picked up
+echo 'class AfterRename { boolean b = new InvoicePayment().charge(new Order()); }' >> "$PKG/Checkout.java"
+tool find_usages '{"symbol":"com.acme.shop.PaymentService#charge","include_overriding":true}'
+expect 'AfterRename'
 
 cleanup
 if [ "$FAILURES" -eq 0 ]; then
