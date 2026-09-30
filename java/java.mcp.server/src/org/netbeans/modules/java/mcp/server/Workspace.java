@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
@@ -45,6 +46,7 @@ import org.netbeans.spi.project.ActionProgress;
 import org.netbeans.spi.project.ActionProvider;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
+import org.openide.modules.Places;
 import org.openide.util.Lookup;
 import org.openide.util.RequestProcessor;
 import org.openide.util.lookup.Lookups;
@@ -60,9 +62,31 @@ public final class Workspace {
     private static final Logger LOG = Logger.getLogger(Workspace.class.getName());
     private static final RequestProcessor RP = new RequestProcessor(Workspace.class.getName(), 1);
     private static final long PRIMING_TIMEOUT_MINUTES = 15;
+    /** How long a tool call waits for the workspace before reporting that it is not ready. */
+    private static final long WAIT_MINUTES = 5;
+    /** Written to the cache directory once the index is complete, so the next start knows it is warm. */
+    private static final String INDEXED_MARKER = "nb-mcp/indexed";
+
+    /**
+     * How fresh the index must be for a tool call.
+     */
+    public enum Freshness {
+        /**
+         * Read queries: after a restart the index of the previous run may be used while NetBeans
+         * verifies it; changes made on disk while the server was not running may be missing then.
+         */
+        INDEXED,
+        /** Refactorings and diagnostics: wait until the index is verified and up to date. */
+        CURRENT
+    }
 
     private final File root;
+    /** Projects opened (before the initial scan). */
     private final CompletableFuture<List<Project>> opened = new CompletableFuture<>();
+    /** The initial scan finished. */
+    private final CompletableFuture<Void> scanned = new CompletableFuture<>();
+    private final ThreadLocal<Boolean> answeredUnverified = new ThreadLocal<>();
+    private volatile boolean warmStart;
     private volatile String phase = "starting";
 
     public Workspace(File root) {
@@ -80,6 +104,14 @@ public final class Workspace {
 
     public boolean isIndexing() {
         return IndexingManager.getDefault().isIndexing();
+    }
+
+    /**
+     * Whether the index is still being verified after a restart; read queries are then answered
+     * from the index of the previous run.
+     */
+    public boolean isVerifyingWarmIndex() {
+        return warmStart && !scanned.isDone();
     }
 
     /** Projects opened for this workspace, or an empty list while still opening. */
@@ -112,17 +144,24 @@ public final class Workspace {
                 // initializes source groups and FileOwnerQuery, like the LSP server does
                 ProjectUtils.getSources(p).getSourceGroups(Sources.TYPE_GENERIC);
             }
-            phase = "indexing";
+            File marker = Places.getCacheSubfile(INDEXED_MARKER);
+            warmStart = marker.isFile();
+            opened.complete(List.copyOf(projects));
+            phase = warmStart ? "verifying the index of the previous run (read queries are answered meanwhile)" : "indexing";
             List<FileObject> roots = javaSourceRoots(projects);
-            waitForScan(roots);
+            waitForScan(roots, 0);
+            if (!marker.isFile()) {
+                marker.createNewFile();
+            }
+            scanned.complete(null);
             phase = "ready";
             LOG.log(Level.INFO, "MCP workspace {0} ready: {1} projects, {2} Java source roots",
                     new Object[]{root, projects.size(), roots.size()});
-            opened.complete(List.copyOf(projects));
         } catch (Throwable t) {
             LOG.log(Level.WARNING, "Cannot open MCP workspace " + root, t);
             phase = "failed: " + t.getMessage();
             opened.completeExceptionally(t);
+            scanned.completeExceptionally(t);
         }
     }
 
@@ -185,13 +224,24 @@ public final class Workspace {
         }
     }
 
-    private static void waitForScan(List<FileObject> roots) throws IOException, InterruptedException, ExecutionException {
+    /**
+     * Waits until the scan of the roots is finished.
+     *
+     * @param timeoutMillis maximum wait, 0 for no limit
+     */
+    private static void waitForScan(List<FileObject> roots, long timeoutMillis)
+            throws IOException, InterruptedException, ExecutionException, TimeoutException {
         if (roots.isEmpty()) {
             return;
         }
         JavaSource js = JavaSource.create(ClasspathInfo.create(roots.get(0)));
         if (js != null) {
-            js.runWhenScanFinished(cc -> { }, true).get();
+            Future<Void> done = js.runWhenScanFinished(cc -> { }, true);
+            if (timeoutMillis > 0) {
+                done.get(timeoutMillis, TimeUnit.MILLISECONDS);
+            } else {
+                done.get();
+            }
         }
     }
 
@@ -206,30 +256,63 @@ public final class Workspace {
     }
 
     /**
-     * Waits until the workspace is open and indexed, picks up changes made on
-     * disk by the agent, and returns the Java source roots.
+     * Waits until the workspace is open and indexed as fresh as the call
+     * needs, picks up changes made on disk by the agent, and returns the Java
+     * source roots. Waits up to {@value #WAIT_MINUTES} minutes.
      *
-     * @throws NotReadyException if the workspace is not ready within the timeout
+     * @throws NotReadyException if the workspace is not ready in time
      */
-    public List<FileObject> awaitSourceRoots(long timeout, TimeUnit unit) throws NotReadyException {
+    public List<FileObject> awaitSourceRoots(Freshness freshness) throws NotReadyException {
+        long deadline = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(WAIT_MINUTES);
         List<Project> projects;
         try {
-            projects = opened.get(timeout, unit);
+            projects = opened.get(WAIT_MINUTES, TimeUnit.MINUTES);
         } catch (TimeoutException ex) {
-            throw new NotReadyException("The workspace is not ready yet (" + phase + "). "
-                    + "Large projects take a while on first start; retry in a moment or call workspace_status.");
+            throw notReady();
         } catch (InterruptedException | ExecutionException ex) {
             throw new NotReadyException("The workspace could not be opened: " + phase);
         }
         List<FileObject> roots = javaSourceRoots(projects);
         // the agent edits files directly on disk; make NetBeans notice before answering
         FileUtil.refreshFor(root);
+        if (freshness == Freshness.INDEXED && isVerifyingWarmIndex()) {
+            // the index of the previous run is complete; NetBeans only checks it for changes
+            answeredUnverified.set(Boolean.TRUE);
+            return roots;
+        }
         try {
-            waitForScan(roots);
+            scanned.get(Math.max(1, deadline - System.currentTimeMillis()), TimeUnit.MILLISECONDS);
+            // the refresh above may have started another scan
+            waitForScan(roots, Math.max(1, deadline - System.currentTimeMillis()));
+        } catch (TimeoutException ex) {
+            throw notReady();
         } catch (IOException | InterruptedException | ExecutionException ex) {
             LOG.log(Level.INFO, "Waiting for scan failed", ex);
         }
         return roots;
+    }
+
+    private NotReadyException notReady() {
+        return new NotReadyException("The workspace is not ready yet (" + phase + ") after waiting "
+                + WAIT_MINUTES + " minutes. The first start of a large workspace indexes everything, "
+                + "later starts are faster; retry, or call workspace_status to see the progress.");
+    }
+
+    /**
+     * Starts tracking a tool call on the current thread.
+     */
+    public void beginCall() {
+        answeredUnverified.remove();
+    }
+
+    /**
+     * Whether the tool call on the current thread was answered from the index
+     * of the previous run while NetBeans was still verifying it.
+     */
+    public boolean endCallAnsweredUnverified() {
+        boolean unverified = Boolean.TRUE.equals(answeredUnverified.get());
+        answeredUnverified.remove();
+        return unverified;
     }
 
     /**

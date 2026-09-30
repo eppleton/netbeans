@@ -69,7 +69,11 @@ nb-mcp --check /path/to/project  # only print which NetBeans, JDK and data direc
 * Every workspace gets its own NetBeans userdir and index cache under `~/.cache/nb-mcp`
   (`--data` / `$NB_MCP_DATA`). The first start indexes the project and the JDK and resolves Maven
   dependencies, which can take minutes on a large project; tools report "not ready" until then.
-  Later starts reuse the index and take seconds.
+  Later starts reuse the index: read tools (`find_*`, `outline`, `apply_rule` searches) answer
+  right away from the previous run's index while NetBeans checks it for changes (the answer says
+  so); refactorings and `diagnostics` wait for that check, which takes about 100 seconds on
+  NetBeans' own `java/` folder (160 modules). Tool calls wait up to 5 minutes before they report
+  "not ready".
 * Compiler messages are English (`--locale` to change).
 * The server exits when the client closes stdin. Logs: stderr and
   `<data>/<workspace>-<id>/userdir/var/log/messages.log`.
@@ -91,7 +95,8 @@ or, shared with the team, `.mcp.json` in the project:
 { "mcpServers": { "netbeans": { "command": "/path/to/nb-mcp", "args": [] } } }
 ```
 
-Allow more startup time on the first run if needed: `MCP_TIMEOUT=120000 claude`.
+Allow more startup time and long tool calls (a refactoring right after a restart waits for
+the index check): `MCP_TIMEOUT=120000 MCP_TOOL_TIMEOUT=600000 claude`.
 
 ### VS Code (GitHub Copilot agent mode)
 

@@ -85,7 +85,7 @@ public final class McpArgsProcessor implements ArgsProcessor {
 
         Workspace ws = new Workspace(dir);
         ws.openAsync();
-        McpServer server = new McpServer(protocolIn, protocolOut, List.of(
+        List<Tool> tools = List.of(
                 new FindSymbolTool(ws),
                 new FindUsagesTool(ws),
                 new FindImplementationsTool(ws),
@@ -97,7 +97,9 @@ public final class McpArgsProcessor implements ArgsProcessor {
                 new SafeDeleteTool(ws),
                 new InlineTool(ws),
                 new ApplyRuleTool(ws),
-                new WorkspaceStatusTool(ws)));
+                new WorkspaceStatusTool(ws));
+        McpServer server = new McpServer(protocolIn, protocolOut,
+                tools.stream().map(t -> (Tool) new WorkspaceTool(t, ws)).toList());
         try {
             server.run();
         } catch (IOException ex) {

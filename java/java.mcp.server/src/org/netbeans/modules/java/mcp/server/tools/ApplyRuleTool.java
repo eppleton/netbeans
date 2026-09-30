@@ -33,7 +33,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
@@ -129,7 +128,7 @@ public final class ApplyRuleTool implements Tool {
         }
         List<FileObject> roots;
         try {
-            roots = workspace.awaitSourceRoots(60, TimeUnit.SECONDS);
+            roots = workspace.awaitSourceRoots(rule.contains("=>") ? Workspace.Freshness.CURRENT : Workspace.Freshness.INDEXED);
         } catch (Workspace.NotReadyException ex) {
             return Result.error(ex.getMessage());
         }

@@ -83,7 +83,7 @@ public final class MoveTool implements Tool {
             return Result.error("'target_package' must be a package name like com.acme.billing");
         }
         int maxDiffLines = Json.integer(arguments, "max_diff_lines", RefactoringRunner.DEFAULT_MAX_DIFF_LINES);
-        Resolution r = Resolution.of(workspace, arguments);
+        Resolution r = Resolution.of(workspace, arguments, Workspace.Freshness.CURRENT);
         if (r.error() != null) {
             return r.error();
         }

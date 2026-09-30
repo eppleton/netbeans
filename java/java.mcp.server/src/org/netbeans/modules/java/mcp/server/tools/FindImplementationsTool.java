@@ -21,7 +21,6 @@ package org.netbeans.modules.java.mcp.server.tools;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import org.netbeans.modules.java.mcp.server.Json;
 import org.netbeans.modules.java.mcp.server.Tool;
 import org.netbeans.modules.java.mcp.server.Workspace;
@@ -90,7 +89,7 @@ public final class FindImplementationsTool implements Tool {
         List<FileObject> roots;
         SymbolResolver.Resolved symbol;
         try {
-            roots = workspace.awaitSourceRoots(60, TimeUnit.SECONDS);
+            roots = workspace.awaitSourceRoots(Workspace.Freshness.INDEXED);
             symbol = SymbolResolver.resolve(spec, roots);
         } catch (Workspace.NotReadyException | SymbolResolver.ResolutionException ex) {
             return Result.error(ex.getMessage());

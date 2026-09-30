@@ -78,7 +78,7 @@ public final class SafeDeleteTool implements Tool {
     @Override
     public Result call(Map<?, ?> arguments) throws Exception {
         int maxDiffLines = Json.integer(arguments, "max_diff_lines", RefactoringRunner.DEFAULT_MAX_DIFF_LINES);
-        Resolution r = Resolution.of(workspace, arguments);
+        Resolution r = Resolution.of(workspace, arguments, Workspace.Freshness.CURRENT);
         if (r.error() != null) {
             return r.error();
         }

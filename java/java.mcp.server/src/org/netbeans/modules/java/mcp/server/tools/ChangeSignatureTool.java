@@ -117,7 +117,7 @@ public final class ChangeSignatureTool implements Tool {
         if (parametersArg == null && newName == null && returnType == null && visibility == null) {
             return Result.error("Nothing to change: give 'parameters', 'new_name', 'return_type' or 'visibility'.");
         }
-        Resolution r = Resolution.of(workspace, arguments);
+        Resolution r = Resolution.of(workspace, arguments, Workspace.Freshness.CURRENT);
         if (r.error() != null) {
             return r.error();
         }

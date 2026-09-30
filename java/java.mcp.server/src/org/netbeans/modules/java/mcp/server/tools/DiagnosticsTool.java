@@ -28,7 +28,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.TimeUnit;
 import org.netbeans.api.editor.mimelookup.MimeLookup;
 import org.netbeans.api.lsp.Diagnostic;
 import org.netbeans.api.queries.FileEncodingQuery;
@@ -89,7 +88,7 @@ public final class DiagnosticsTool implements Tool {
         int limit = Json.integer(arguments, "limit", DEFAULT_LIMIT);
         List<FileObject> roots;
         try {
-            roots = workspace.awaitSourceRoots(60, TimeUnit.SECONDS);
+            roots = workspace.awaitSourceRoots(Workspace.Freshness.CURRENT);
         } catch (Workspace.NotReadyException ex) {
             return Result.error(ex.getMessage());
         }

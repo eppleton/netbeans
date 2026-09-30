@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -93,7 +92,7 @@ public final class OutlineTool implements Tool {
         int limit = Json.integer(arguments, "limit", DEFAULT_LIMIT);
         List<FileObject> roots;
         try {
-            roots = workspace.awaitSourceRoots(60, TimeUnit.SECONDS);
+            roots = workspace.awaitSourceRoots(Workspace.Freshness.INDEXED);
         } catch (Workspace.NotReadyException ex) {
             return Result.error(ex.getMessage());
         }

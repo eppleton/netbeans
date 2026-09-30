@@ -27,7 +27,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
@@ -95,7 +94,7 @@ public final class FindSymbolTool implements Tool {
         int limit = Json.integer(arguments, "limit", DEFAULT_LIMIT);
         List<FileObject> roots;
         try {
-            roots = workspace.awaitSourceRoots(30, TimeUnit.SECONDS);
+            roots = workspace.awaitSourceRoots(Workspace.Freshness.INDEXED);
         } catch (Workspace.NotReadyException ex) {
             return Result.error(ex.getMessage());
         }
