@@ -83,6 +83,19 @@ Learned on the way:
 - NetBeans' inline substitutes an argument for every use of the parameter (the expression may then be
   evaluated twice) and can emit a spurious "not accessible" warning; the tool description warns about it.
 
+**M4 done** (`apply_rule`; 12 tools, the budget is used up). Findings:
+- No friend list or implementation dependency needed after all: `spiimpl.batch` lives in `spi.java.hints`
+  and is not exported (other modules reach it by `<implementation-version/>`), but the public
+  `org.netbeans.spi.java.hints.support.TransformationSupport` wraps it. `processAllProjects()` returns
+  uncommitted `ModificationResult`s: `getResultingSource` gives a real dry run, `Difference.exclude`
+  implements the `paths` scope, `commit()` applies (then save via `Savable.REGISTRY`, then reindex).
+- Rule text goes through the declarative parser only if it contains `;;`; the tool appends it.
+- Search mode (no `=>`) uses `TransformationSupport.create(pattern, Transformer)`, which calls back per
+  occurrence; only the pattern and its type constraints are checked there.
+- The parser's errors are not reachable through public API, so a broken rule simply matched nothing.
+  `ApplyRuleTool.checkSyntax` parses pattern and replacement with the JDK's javac first (`$x;` rewritten
+  to `$x();` for statement variables); `Diagnostic.getMessage(Locale.ROOT)` for English.
+
 ## Build, run, test
 
 ```sh

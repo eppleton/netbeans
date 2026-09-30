@@ -147,6 +147,24 @@ public class Order {
 }
 EOF
 
+cat > "$PKG/Validation.java" <<'EOF'
+package com.acme.shop;
+
+class Validation {
+    static boolean blank(String s) {
+        return s == null || s.length() == 0;
+    }
+
+    static boolean blankTrimmed(String s) {
+        return s == null || s.trim().length() == 0;
+    }
+
+    static boolean noLines(java.util.List<String> lines) {
+        return lines.size() == 0;
+    }
+}
+EOF
+
 cat > "$PKG/Pricing.java" <<'EOF'
 package com.acme.shop;
 
@@ -315,6 +333,7 @@ expect '"name":"move"'
 expect '"name":"change_signature"'
 expect '"name":"safe_delete"'
 expect '"name":"inline"'
+expect '"name":"apply_rule"'
 
 echo "--- waiting for the workspace to be ready (up to ${READY_TIMEOUT}s)"
 START=$(date +%s)
@@ -550,6 +569,40 @@ expect '+import com.acme.billing.InvoicePayment;'
 
 tool find_symbol '{"query":"InvoicePayment"}'
 expect 'com.acme.billing.InvoicePayment'
+
+tool diagnostics '{}'
+expect 'No compile errors in the workspace'
+
+# --- 7. structural search and replace -------------------------------------------
+
+tool apply_rule '{"rule":"$s.length() == 0 :: $s instanceof java.lang.String"}'
+expect '"isError":false'
+expect '2 matching lines in 1 file'
+expect '5: return s == null || s.length() == 0;'
+expect '9: return s == null || s.trim().length() == 0;'
+expect_not 'lines.size()'
+
+RULE='$s.length() == 0 :: $s instanceof java.lang.String => $s.isEmpty() ;;'
+tool apply_rule "{\"rule\":\"$RULE\",\"dry_run\":true}"
+expect 'Dry run, nothing written: 1 file would change'
+expect '+        return s == null || s.isEmpty();'
+expect '+        return s == null || s.trim().isEmpty();'
+grep -q 'isEmpty' "$PKG/Validation.java" && fail "a dry run must not write"
+
+tool apply_rule "{\"rule\":\"$RULE\",\"paths\":[\"src/test/java\"]}"
+expect 'No matches, nothing to change'
+grep -q 'isEmpty' "$PKG/Validation.java" && fail "changes outside 'paths' must not be written"
+
+tool apply_rule "{\"rule\":\"$RULE\",\"paths\":[\"src/main/java\"]}"
+expect 'Applied: 1 file changed and saved'
+[ "$(grep -c 'isEmpty()' "$PKG/Validation.java")" = 2 ] || fail "the rewrite was not written to disk"
+
+tool apply_rule '{"rule":"$s.length() == 0 :: $s instanceof java.lang.String"}'
+expect 'No matches'
+
+tool apply_rule '{"rule":"$a.foo((( => bar ;;"}'
+expect '"isError":true'
+expect 'does not parse as Java'
 
 tool diagnostics '{}'
 expect 'No compile errors in the workspace'
