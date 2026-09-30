@@ -22,12 +22,15 @@
 # the responses. Finally appends a usage to a file on disk and checks that
 # find_usages picks it up.
 #
+# The server is started through the nb-mcp launcher of the installation, so
+# the launcher is tested too.
+#
 # Usage: smoke.sh [netbeans-launcher]
 #   defaults to <repo>/nbbuild/netbeans/bin/netbeans
 # Environment:
 #   SMOKE_DIR     work directory (default ${TMPDIR:-/tmp}/nbmcp-smoke); the
 #                 project is regenerated on each run, userdir and cache are kept
-#   JDK_HOME      JDK for NetBeans (default: the one of 'java' on PATH)
+#   JDK_HOME      JDK for NetBeans (default: what nb-mcp finds)
 #   READY_TIMEOUT seconds to wait for the workspace to be ready (default 600)
 
 set -u
@@ -37,9 +40,7 @@ REPO=$(cd "$HERE/../../../.." && pwd)
 NB=${1:-$REPO/nbbuild/netbeans/bin/netbeans}
 SMOKE_DIR=${SMOKE_DIR:-${TMPDIR:-/tmp}/nbmcp-smoke}
 READY_TIMEOUT=${READY_TIMEOUT:-600}
-if [ -z "${JDK_HOME:-}" ]; then
-    JDK_HOME=$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")
-fi
+NB_MCP=$(cd "$(dirname "$NB")/.." && pwd)/java/bin/nb-mcp
 PROJECT=$SMOKE_DIR/project
 PKG=$PROJECT/src/main/java/com/acme/shop
 FAILURES=0
@@ -219,27 +220,21 @@ EOF
 
 # --- 2. start the server ---------------------------------------------------
 
-mkdir -p "$SMOKE_DIR/userdir/var"
-# a fresh userdir otherwise offers to import settings of an installed NetBeans,
-# and that dialog fails headless: NetBeans exits before the server starts
-touch "$SMOKE_DIR/userdir/var/imported"
+[ -x "$NB_MCP" ] || { echo "FAIL: no executable $NB_MCP" >&2; exit 1; }
 STDERR_LOG=$SMOKE_DIR/stderr.log
+NB_MCP_ARGS=(--netbeans "$NB" --data "$SMOKE_DIR/data")
+[ -n "${JDK_HOME:-}" ] && NB_MCP_ARGS+=(--jdk "$JDK_HOME")
 echo "Project:  $PROJECT"
-echo "Launcher: $NB"
-echo "JDK:      $JDK_HOME"
-echo "Logs:     $STDERR_LOG, $SMOKE_DIR/userdir/var/log/messages.log"
+echo "Launcher: $NB_MCP ${NB_MCP_ARGS[*]}"
+"$NB_MCP" "${NB_MCP_ARGS[@]}" --check "$PROJECT"
+echo "Logs:     $STDERR_LOG, <data>/userdir/var/log/messages.log"
 
 # FIFOs instead of coproc: macOS ships bash 3.2
 TO_NB=$SMOKE_DIR/to-nb.fifo
 FROM_NB=$SMOKE_DIR/from-nb.fifo
 rm -f "$TO_NB" "$FROM_NB"
 mkfifo "$TO_NB" "$FROM_NB"
-"$NB" --nogui --nosplash -J-Djava.awt.headless=true \
-    -J-Duser.language=en -J-Duser.country=US \
-    --jdkhome "$JDK_HOME" \
-    --userdir "$SMOKE_DIR/userdir" --cachedir "$SMOKE_DIR/cache" \
-    --start-mcp-server --mcp-workspace "$PROJECT" \
-    < "$TO_NB" > "$FROM_NB" 2> "$STDERR_LOG" &
+"$NB_MCP" "${NB_MCP_ARGS[@]}" "$PROJECT" < "$TO_NB" > "$FROM_NB" 2> "$STDERR_LOG" &
 NB_PID=$!
 # fd 3 writes to the server's stdin, fd 4 reads its stdout
 exec 3> "$TO_NB"

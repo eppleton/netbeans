@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Starts a headless NetBeans as MCP server (stdio) for Java code intelligence.
+#
+# Usage: nb-mcp [options] [workspace] [-- extra NetBeans launcher arguments]
+#   workspace          project or folder of projects; default: current directory
+#   --netbeans <path>  NetBeans launcher (bin/netbeans); default: the installation
+#                      this script belongs to, or $NB_MCP_NETBEANS
+#   --jdk <path>       JDK 17+ home; default: $NB_MCP_JDK, $JAVA_HOME, 'java' on PATH
+#   --data <dir>       where per-workspace userdirs and index caches are kept;
+#                      default: $NB_MCP_DATA or ${XDG_CACHE_HOME:-~/.cache}/nb-mcp
+#   --locale <lang>    language of compiler messages; default: en
+#   --check            only print what would be started, then exit
+#
+# stdout carries the MCP protocol, so this script only ever writes to stderr.
+
+set -u
+
+die() {
+    echo "nb-mcp: $*" >&2
+    exit 2
+}
+
+NETBEANS=${NB_MCP_NETBEANS:-}
+JDK=${NB_MCP_JDK:-}
+DATA=${NB_MCP_DATA:-${XDG_CACHE_HOME:-$HOME/.cache}/nb-mcp}
+LANGUAGE=en
+CHECK=
+WORKSPACE=
+EXTRA=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --netbeans) [ $# -ge 2 ] || die "--netbeans needs a path"; NETBEANS=$2; shift 2 ;;
+        --jdk) [ $# -ge 2 ] || die "--jdk needs a path"; JDK=$2; shift 2 ;;
+        --data) [ $# -ge 2 ] || die "--data needs a directory"; DATA=$2; shift 2 ;;
+        --locale) [ $# -ge 2 ] || die "--locale needs a language"; LANGUAGE=$2; shift 2 ;;
+        --check) CHECK=1; shift ;;
+        -h|--help) sed -n '/^# Starts/,/^# stdout/p' "$0" >&2; exit 0 ;;
+        --) shift; EXTRA=("$@"); break ;;
+        -*) die "unknown option $1 (use -- to pass options to NetBeans)" ;;
+        *) [ -z "$WORKSPACE" ] || die "only one workspace can be given"; WORKSPACE=$1; shift ;;
+    esac
+done
+
+# --- NetBeans ------------------------------------------------------------------
+if [ -z "$NETBEANS" ]; then
+    # installed as <netbeans>/<cluster>/bin/nb-mcp next to <netbeans>/bin/netbeans
+    here=$(cd "$(dirname "$0")" && pwd)
+    NETBEANS=$here/../../bin/netbeans
+fi
+[ -x "$NETBEANS" ] || die "NetBeans launcher not found at $NETBEANS; use --netbeans or NB_MCP_NETBEANS"
+NETBEANS=$(cd "$(dirname "$NETBEANS")" && pwd)/$(basename "$NETBEANS")
+
+# --- JDK -----------------------------------------------------------------------
+# a usable JDK home: has a release file (unlike /usr on macOS, whose bin/java is a stub), javac and Java 17+
+jdk_ok() {
+    [ -n "$1" ] && [ -f "$1/release" ] && [ -x "$1/bin/java" ] && [ -x "$1/bin/javac" ] || return 1
+    major=$(sed -n 's/^JAVA_VERSION="\([0-9]*\).*/\1/p' "$1/release")
+    [ -n "$major" ] && [ "$major" -ge 17 ]
+}
+path_jdk() {
+    command -v java > /dev/null || return 0
+    java_bin=$(command -v java)
+    # follow symlinks (sdkman, alternatives, Homebrew) to the real JDK
+    while [ -L "$java_bin" ]; do
+        link=$(readlink "$java_bin")
+        case "$link" in
+            /*) java_bin=$link ;;
+            *) java_bin=$(dirname "$java_bin")/$link ;;
+        esac
+    done
+    (cd "$(dirname "$java_bin")/.." && pwd)
+}
+if [ -n "$JDK" ]; then
+    jdk_ok "$JDK" || die "$JDK is not a JDK 17+ home (needs release, bin/java, bin/javac)"
+else
+    for candidate in "${JAVA_HOME:-}" "$(path_jdk)" \
+            "$( [ -x /usr/libexec/java_home ] && /usr/libexec/java_home -v 17+ 2> /dev/null)"; do
+        if jdk_ok "$candidate"; then
+            JDK=$candidate
+            break
+        fi
+    done
+    [ -n "$JDK" ] || die "no JDK 17+ found in JAVA_HOME, on PATH or via java_home; use --jdk or NB_MCP_JDK"
+fi
+
+# --- workspace and its NetBeans data ---------------------------------------------
+[ -n "$WORKSPACE" ] || WORKSPACE=$PWD
+[ -d "$WORKSPACE" ] || die "workspace $WORKSPACE is not a directory"
+WORKSPACE=$(cd "$WORKSPACE" && pwd)
+
+# one userdir and index cache per workspace: kept between runs so only the first start indexes
+id=$(printf '%s' "$WORKSPACE" | cksum | cut -d' ' -f1)
+dir=$DATA/$(basename "$WORKSPACE")-$id
+if [ -n "$CHECK" ]; then
+    printf 'workspace: %s\nnetbeans:  %s\njdk:       %s\ndata:      %s\n' "$WORKSPACE" "$NETBEANS" "$JDK" "$dir" >&2
+    exit 0
+fi
+mkdir -p "$dir/userdir/var" "$dir/cache" || die "cannot create $dir"
+# otherwise a fresh userdir offers to import the settings of an installed NetBeans;
+# that dialog fails headless and NetBeans exits before the server starts
+[ -e "$dir/userdir/var/imported" ] || touch "$dir/userdir/var/imported"
+
+echo "nb-mcp: workspace $WORKSPACE, NetBeans $NETBEANS, JDK $JDK, data $dir" >&2
+
+exec "$NETBEANS" --nogui --nosplash \
+    -J-Djava.awt.headless=true -J-Duser.language="$LANGUAGE" -J-Duser.country= \
+    --jdkhome "$JDK" \
+    --userdir "$dir/userdir" --cachedir "$dir/cache" \
+    ${EXTRA[@]+"${EXTRA[@]}"} \
+    --start-mcp-server --mcp-workspace "$WORKSPACE"
