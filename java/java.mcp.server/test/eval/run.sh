@@ -20,7 +20,8 @@
 # Runs the evaluation tasks with Claude Code in headless mode, once with only
 # its built-in tools ("baseline") and once with the NetBeans MCP server added
 # ("netbeans"), each on a fresh copy of the fixture project, and records
-# correctness (the task's check.sh), turns, tokens, cost and time.
+# correctness (the task's check.sh), turns, tokens, cost, time and which tools
+# the agent called (from the stream-json transcript, kept as <run>.jsonl).
 #
 # THIS USES YOUR CLAUDE CODE LOGIN AND COSTS TOKENS: every run is a real session.
 #
@@ -98,29 +99,19 @@ for task_dir in "$HERE"/tasks/$TASKS/; do
             fresh_project
             allowed=("${BASE_TOOLS[@]}")
             [ "$mode" = netbeans ] && allowed+=(mcp__netbeans)
-            args=(-p "$prompt" --output-format json --no-session-persistence
+            args=(-p "$prompt" --output-format stream-json --verbose --no-session-persistence
                 --strict-mcp-config --mcp-config "$(mcp_config "$mode")"
                 --permission-mode acceptEdits --allowedTools "${allowed[@]}")
             [ -n "$MODEL" ] && args+=(--model "$MODEL")
             start=$(date +%s)
-            (cd "$WORK" && MCP_TIMEOUT=120000 claude "${args[@]}" > "$RESULTS/$run.json" 2> "$RESULTS/$run.stderr")
+            (cd "$WORK" && MCP_TIMEOUT=120000 claude "${args[@]}" > "$RESULTS/$run.jsonl" 2> "$RESULTS/$run.stderr")
             end=$(date +%s)
             check=$(cd "$WORK" && bash "$task_dir/check.sh" 2>&1)
             status=$?
             (cd "$WORK" && git add -A && git diff --cached) > "$RESULTS/$run.diff"
             printf '%s\n' "$check" > "$RESULTS/$run.check"
-            python3 - "$RESULTS/$run.json" "$task" "$mode" "$rep" "$status" "$((end - start))" >> "$RESULTS/runs.tsv" <<'PY'
-import json, sys
-path, task, mode, rep, status, wall = sys.argv[1:]
-try:
-    r = json.load(open(path))
-except Exception:
-    r = {}
-u = r.get("usage", {})
-tokens = sum(u.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"))
-print("\t".join(map(str, [task, mode, rep, "pass" if status == "0" else "FAIL", r.get("num_turns", ""),
-                          tokens, u.get("output_tokens", ""), r.get("total_cost_usd", ""), wall])))
-PY
+            python3 "$HERE/metrics.py" "$RESULTS/$run.jsonl" "$task" "$mode" "$rep" "$status" "$((end - start))" \
+                >> "$RESULTS/runs.tsv"
             echo "    $(tail -1 "$RESULTS/runs.tsv" | cut -f4) ($(printf '%s' "$check" | tail -1))"
         done
     done
