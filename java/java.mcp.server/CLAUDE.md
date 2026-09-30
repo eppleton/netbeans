@@ -16,7 +16,11 @@ transformations (Jackpot).
 ## Where we are
 
 Module scaffold lives here, in a checkout of apache/netbeans on branch `mcp-server`
-(our fork's working branch, based on apache/netbeans master; rebase onto master, don't merge).
+(our fork's working branch on github.com/eppleton/netbeans, based on apache/netbeans master).
+Master is brought in by merging (the user syncs the fork on GitHub, which merges), so the fork's
+branch may be ahead: fetch before pushing, and rebase local commits onto `fork/mcp-server` instead of
+force-pushing. Pushing needs the `eppleton` GitHub account; `gh` is logged in with it, but another
+account is active, so push with a one-off credential helper that uses `gh auth token --user eppleton`.
 The only change outside the module is one line registering it in
 `nbbuild/cluster.properties` (java cluster). Read `README.md` for usage.
 
