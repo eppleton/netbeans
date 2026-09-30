@@ -112,8 +112,12 @@ runs themselves need the user's go-ahead (they use their Claude Code login and c
 - First run (2026-09-30, 1 rep, default model, $1.35 total): all 8 sessions correct in both modes, so
   the fixture is too easy to separate correctness. With NetBeans: rename 7 vs. 16 turns ($0.13 vs.
   $0.24), migration 7 vs. 15 turns, callers 5 vs. 7; remove-deprecated no gain (14 turns both, slightly
-  dearer). Next: record `--output-format stream-json` to see which tools were used, more reps, a larger
-  real project.
+  dearer).
+- Second run (stream-json, 3 reps, $4.02, `test/eval/RESULTS.md`): 12/12 correct in both modes; with the
+  server 7.7 vs. 13.2 turns and $0.145 vs. $0.190 per run; server used in every run, 0 MCP errors.
+  Gains: find_usages, rename, apply_rule; remove-deprecated varies (inline, safe_delete or by hand).
+  Claude Code loads MCP schemas via ToolSearch first (one turn). Next: a larger real project where
+  text search fails.
 
 ## Build, run, test
 

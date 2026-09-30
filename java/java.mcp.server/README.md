@@ -158,8 +158,9 @@ unrelated classes, names in comments and strings, `String` next to `StringBuilde
 | 03 remove a deprecated method, migrate callers | compiles, tests pass, no call left |
 | 04 `String.length() == 0` to `isEmpty()` | compiles, `StringBuilder`, arrays and collections untouched |
 
-It records correctness, turns, tokens, cost and time per run (`--reps N` for repetitions) and
-prints a Markdown summary. **Every run is a real Claude Code session on your login and costs
+It records correctness, turns, tokens, cost, time and the tools the agent called per run (the
+session transcripts are kept as stream-json; `--reps N` for repetitions) and prints a Markdown
+summary. Results so far: [test/eval/RESULTS.md](test/eval/RESULTS.md). **Every run is a real Claude Code session on your login and costs
 tokens.** The checks were validated by solving all tasks with the server's own tools.
 
 ## Design notes
