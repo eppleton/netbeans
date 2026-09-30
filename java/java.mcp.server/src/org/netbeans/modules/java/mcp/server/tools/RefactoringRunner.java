@@ -195,20 +195,32 @@ final class RefactoringRunner {
     }
 
     private void reindex(List<Change> changes) {
+        Set<URL> files = new LinkedHashSet<>();
+        for (Change c : changes) {
+            files.add(c.oldUrl());
+            if (c.newUrl() != null) {
+                files.add(c.newUrl());
+            }
+        }
+        reindex(roots, files);
+    }
+
+    /**
+     * Reindexes the given files (also deleted ones) and waits until done, so
+     * that the next tool call sees the changes.
+     */
+    static void reindex(List<FileObject> roots, Set<URL> files) {
         for (FileObject root : roots) {
             URL rootUrl = root.toURL();
             String prefix = rootUrl.toString();
-            Set<URL> files = new LinkedHashSet<>();
-            for (Change c : changes) {
-                if (c.oldUrl().toString().startsWith(prefix)) {
-                    files.add(c.oldUrl());
-                }
-                if (c.newUrl() != null && c.newUrl().toString().startsWith(prefix)) {
-                    files.add(c.newUrl());
+            Set<URL> inRoot = new LinkedHashSet<>();
+            for (URL u : files) {
+                if (u.toString().startsWith(prefix)) {
+                    inRoot.add(u);
                 }
             }
-            if (!files.isEmpty()) {
-                IndexingManager.getDefault().refreshIndexAndWait(rootUrl, files);
+            if (!inRoot.isEmpty()) {
+                IndexingManager.getDefault().refreshIndexAndWait(rootUrl, inRoot);
             }
         }
     }

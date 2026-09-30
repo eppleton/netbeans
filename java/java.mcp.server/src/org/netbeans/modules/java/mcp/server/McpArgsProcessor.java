@@ -24,6 +24,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.List;
 import org.netbeans.api.sendopts.CommandException;
+import org.netbeans.modules.java.mcp.server.tools.ApplyRuleTool;
 import org.netbeans.modules.java.mcp.server.tools.ChangeSignatureTool;
 import org.netbeans.modules.java.mcp.server.tools.DiagnosticsTool;
 import org.netbeans.modules.java.mcp.server.tools.FindImplementationsTool;
@@ -95,6 +96,7 @@ public final class McpArgsProcessor implements ArgsProcessor {
                 new ChangeSignatureTool(ws),
                 new SafeDeleteTool(ws),
                 new InlineTool(ws),
+                new ApplyRuleTool(ws),
                 new WorkspaceStatusTool(ws)));
         try {
             server.run();

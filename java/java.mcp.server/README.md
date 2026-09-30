@@ -39,6 +39,7 @@ index and refactoring engine the IDE and the Java LSP server use.
 | `change_signature` | Adds, removes, reorders, renames or retypes parameters, or changes name, return type or visibility of a method; updates callers and overriders |
 | `safe_delete` | Deletes a type or member only if it is unused; otherwise lists the blocking usages |
 | `inline` | Inlines a method or constant into all usages and removes it |
+| `apply_rule` | Structural search, or search and replace with a NetBeans declarative hint rule (Jackpot) across the workspace; dry run and path scope supported |
 
 All refactoring tools write their changes to disk and return warnings plus a unified diff (`git diff`
 format). Fatal problems stop them before anything changes.
