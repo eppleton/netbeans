@@ -69,6 +69,22 @@ fi
 [ -x "$NETBEANS" ] || die "NetBeans launcher not found at $NETBEANS; use --netbeans or NB_MCP_NETBEANS"
 NETBEANS=$(cd "$(dirname "$NETBEANS")" && pwd)/$(basename "$NETBEANS")
 
+# Features on Demand (the ergonomics cluster) keeps most modules, this one included, disabled
+# until the IDE's UI asks for them, so --start-mcp-server would be unknown. A headless server
+# needs them all: pass the installation's clusters without ergonomics (a later --clusters wins).
+CLUSTERS=
+nb_home=$(cd "$(dirname "$NETBEANS")/.." && pwd)
+if [ -d "$nb_home/ergonomics" ] && [ -f "$nb_home/etc/netbeans.clusters" ]; then
+    while read -r cluster; do
+        case "$cluster" in
+            ''|'#'*|platform|ergonomics) continue ;;
+            /*) dir=$cluster ;;
+            *) dir=$nb_home/$cluster ;;
+        esac
+        [ -d "$dir" ] && CLUSTERS=${CLUSTERS:+$CLUSTERS:}$dir
+    done < "$nb_home/etc/netbeans.clusters"
+fi
+
 # --- JDK -----------------------------------------------------------------------
 # a usable JDK home: has a release file (unlike /usr on macOS, whose bin/java is a stub), javac and Java 17+
 jdk_ok() {
@@ -112,6 +128,7 @@ id=$(printf '%s' "$WORKSPACE" | cksum | cut -d' ' -f1)
 dir=$DATA/$(basename "$WORKSPACE")-$id
 if [ -n "$CHECK" ]; then
     printf 'workspace: %s\nnetbeans:  %s\njdk:       %s\ndata:      %s\n' "$WORKSPACE" "$NETBEANS" "$JDK" "$dir" >&2
+    [ -z "$CLUSTERS" ] || printf 'clusters:  %s (without ergonomics)\n' "$CLUSTERS" >&2
     exit 0
 fi
 mkdir -p "$dir/userdir/var" "$dir/cache" || die "cannot create $dir"
@@ -125,5 +142,6 @@ exec "$NETBEANS" --nogui --nosplash \
     -J-Djava.awt.headless=true -J-Duser.language="$LANGUAGE" -J-Duser.country= \
     --jdkhome "$JDK" \
     --userdir "$dir/userdir" --cachedir "$dir/cache" \
+    ${CLUSTERS:+--clusters "$CLUSTERS"} \
     ${EXTRA[@]+"${EXTRA[@]}"} \
     --start-mcp-server --mcp-workspace "$WORKSPACE"
