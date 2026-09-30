@@ -55,38 +55,112 @@ com.acme.Foo#<init>()           com.acme.Foo#Foo(String)
 
 ## Running
 
-Build the IDE (or just the Java cluster), then start NetBeans headless:
+Build NetBeans (at least the Java cluster, which contains this module). The build installs the
+launcher `nb-mcp` next to the module, in `<netbeans>/java/bin/nb-mcp` (for a source build:
+`nbbuild/netbeans/java/bin/nb-mcp`). It starts NetBeans headless as an MCP server on stdio:
 
 ```sh
-nbbuild/netbeans/bin/netbeans --nogui --nosplash \
-    -J-Djava.awt.headless=true -J-Duser.language=en -J-Duser.country=US \
-    --jdkhome /path/to/jdk-17+ \
-    --userdir  ~/.cache/nb-mcp/myproject/userdir \
-    --cachedir ~/.cache/nb-mcp/myproject/cache \
-    --start-mcp-server --mcp-workspace /path/to/myproject
+nb-mcp /path/to/project        # a Maven/Gradle/Ant project or a folder of projects; default: current directory
+nb-mcp --check /path/to/project  # only print which NetBeans, JDK and data directory would be used
 ```
 
-* Use a **dedicated userdir per workspace**. With a userdir that is already in use,
-  the launcher forwards the command line to the running instance instead of starting a new one.
-* Create `<userdir>/var/imported` before the first start. Otherwise a fresh userdir offers
-  to import the settings of an installed NetBeans, the dialog fails headless and NetBeans exits:
-  `mkdir -p <userdir>/var && touch <userdir>/var/imported`.
-* The cache directory holds the index; keep it between runs so only the first start is slow.
-* `--mcp-workspace` may be a project or a folder containing projects; it defaults to the
-  current directory.
-* `-J-Duser.language=en -J-Duser.country=US` makes compiler messages English regardless of the
-  system locale, which is what agents expect.
-* stdout carries the protocol only. Logs go to stderr and `<userdir>/var/log/messages.log`.
-* NetBeans exits when the client closes stdin.
+* A JDK 17 or newer is needed. `nb-mcp` takes `--jdk`, `$NB_MCP_JDK`, `$JAVA_HOME`, the `java` on
+  the `PATH` or (macOS) `/usr/libexec/java_home`, in this order.
+* Every workspace gets its own NetBeans userdir and index cache under `~/.cache/nb-mcp`
+  (`--data` / `$NB_MCP_DATA`). The first start indexes the project and the JDK and resolves Maven
+  dependencies, which can take minutes on a large project; tools report "not ready" until then.
+  Later starts reuse the index and take seconds.
+* Compiler messages are English (`--locale` to change).
+* The server exits when the client closes stdin. Logs: stderr and
+  `<data>/<workspace>-<id>/userdir/var/log/messages.log`.
+* Other NetBeans instances, including a running IDE, are not affected.
+
+In the snippets below, replace `/path/to/nb-mcp` with the launcher's absolute path. Clients start
+the server in the project directory, so no workspace argument is needed; give one if your client
+starts servers elsewhere.
 
 ### Claude Code
 
 ```sh
-claude mcp add netbeans -- /path/to/netbeans/bin/netbeans --nogui --nosplash \
-    -J-Djava.awt.headless=true -J-Duser.language=en -J-Duser.country=US \
-    --userdir ~/.cache/nb-mcp/myproject/userdir --cachedir ~/.cache/nb-mcp/myproject/cache \
-    --start-mcp-server --mcp-workspace .
+claude mcp add netbeans -- /path/to/nb-mcp
 ```
+
+or, shared with the team, `.mcp.json` in the project:
+
+```json
+{ "mcpServers": { "netbeans": { "command": "/path/to/nb-mcp", "args": [] } } }
+```
+
+Allow more startup time on the first run if needed: `MCP_TIMEOUT=120000 claude`.
+
+### VS Code (GitHub Copilot agent mode)
+
+`.vscode/mcp.json`:
+
+```json
+{ "servers": { "netbeans": { "type": "stdio", "command": "/path/to/nb-mcp", "args": ["${workspaceFolder}"] } } }
+```
+
+### Codex CLI
+
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.netbeans]
+command = "/path/to/nb-mcp"
+args = []
+startup_timeout_sec = 120
+```
+
+### Cursor
+
+`.cursor/mcp.json` in the project:
+
+```json
+{ "mcpServers": { "netbeans": { "command": "/path/to/nb-mcp", "args": [] } } }
+```
+
+### omp (Oh My Pi)
+
+`.omp/mcp.json` in the project (omp also reads `.mcp.json`, `.cursor/` and `.vscode/` files):
+
+```json
+{ "mcpServers": { "netbeans": { "command": "/path/to/nb-mcp", "args": [] } } }
+```
+
+### Without the launcher
+
+```sh
+mkdir -p <userdir>/var && touch <userdir>/var/imported
+<netbeans>/bin/netbeans --nogui --nosplash \
+    -J-Djava.awt.headless=true -J-Duser.language=en -J-Duser.country=US \
+    --jdkhome /path/to/jdk-17+ --userdir <userdir> --cachedir <cachedir> \
+    --start-mcp-server --mcp-workspace /path/to/project
+```
+
+* Use a dedicated userdir per workspace. With a userdir that is already in use, the launcher
+  forwards the command line to the running instance instead of starting a new one.
+* Without `<userdir>/var/imported`, a fresh userdir offers to import the settings of an installed
+  NetBeans; the dialog fails headless and NetBeans exits before the server starts.
+* stdout carries the protocol only.
+
+## Evaluation
+
+`test/eval/run.sh` measures whether the server helps: it runs four tasks with Claude Code in headless
+mode, once with only its built-in tools and once with this server added, each on a fresh copy of a
+generated two-module project full of traps for text search (overloads, same-named methods of
+unrelated classes, names in comments and strings, `String` next to `StringBuilder`):
+
+| Task | Checked by |
+|---|---|
+| 01 find the callers of one overload | exact `path:line` list, no source changes |
+| 02 rename a method across modules | compiles, only the right `apply` renamed |
+| 03 remove a deprecated method, migrate callers | compiles, tests pass, no call left |
+| 04 `String.length() == 0` to `isEmpty()` | compiles, `StringBuilder`, arrays and collections untouched |
+
+It records correctness, turns, tokens, cost and time per run (`--reps N` for repetitions) and
+prints a Markdown summary. **Every run is a real Claude Code session on your login and costs
+tokens.** The checks were validated by solving all tasks with the server's own tools.
 
 ## Design notes
 

@@ -96,6 +96,25 @@ Learned on the way:
   `ApplyRuleTool.checkSyntax` parses pattern and replacement with the JDK's javac first (`$x;` rewritten
   to `$x();` for statement variables); `Diagnostic.getMessage(Locale.ROOT)` for English.
 
+**M5 (packaging and evidence)**: launcher, client snippets and evaluation harness done; the evaluation
+runs themselves need the user's go-ahead (they use their Claude Code login and cost tokens).
+- `release/bin/nb-mcp` is copied into the cluster (`<netbeans>/java/bin/nb-mcp`, executable, listed in
+  update tracking; `nbm.executable.files` for NBMs) and finds `bin/netbeans` relative to itself.
+  `--check` prints the resolution without starting anything; use it for tests, a bare start on a
+  directory like the repo root really opens it.
+- JDK detection must require `<home>/release`: macOS `/usr/bin/java` and `javac` are stubs, so `/usr`
+  passed a "has bin/java and bin/javac" test.
+- smoke.sh starts the server through `nb-mcp`, so the launcher is tested on every run.
+- `test/eval`: fixture.sh (two-module project, compiles with plain javac, no dependencies), four tasks
+  with prompt.md (license header stripped by run.sh) and check.sh, run.sh (claude -p, baseline vs.
+  netbeans, fixed work path so the index stays warm, `warmup.py` before the timed runs),
+  summarize.py. The checks fail on the untouched fixture and pass on solutions made with the tools.
+- First run (2026-09-30, 1 rep, default model, $1.35 total): all 8 sessions correct in both modes, so
+  the fixture is too easy to separate correctness. With NetBeans: rename 7 vs. 16 turns ($0.13 vs.
+  $0.24), migration 7 vs. 15 turns, callers 5 vs. 7; remove-deprecated no gain (14 turns both, slightly
+  dearer). Next: record `--output-format stream-json` to see which tools were used, more reps, a larger
+  real project.
+
 ## Build, run, test
 
 ```sh
