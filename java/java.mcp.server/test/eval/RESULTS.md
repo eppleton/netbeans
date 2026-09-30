@@ -62,3 +62,65 @@ Observations (from the recorded tool calls):
   schemas on demand; that costs one turn per session.
 * Small sample (3 repetitions, one fixture, one model). A larger real project, where text search
   actually gets things wrong, is the next step.
+
+## 2026-09-30: NetBeans' own code base
+
+Workspace: the `java/` folder of a NetBeans checkout (158 NetBeans module projects, 272 Java source
+roots, about 8,900 Java files), started through `nb-mcp` with an empty index, built with
+`cluster.config=basic` (Java plus apisupport, which recognizes NetBeans module projects). The
+repository was an APFS clone, so the refactoring did not touch the real checkout.
+
+| Call | Seconds | Result | Checked against |
+|---|---|---|---|
+| start until ready (empty index) | 344 | 158 projects open and indexed | |
+| `find_symbol` WhereUsedQueryConst | 2.4 | the enum in refactoring.java | |
+| `find_symbol` JavaRefactoringPlugin#process* | 1.2 | the `processFiles` overloads | |
+| `find_usages` JavaRefactoringUtils#getClasspathInfoFor | 12.8 | 29 usages | identical to a grep for qualified calls; plain grep for the name: 65 lines, most of them the same-named internal `RefactoringUtils` overloads |
+| `find_implementations` JavaRefactoringPlugin | 13.0 | 32 subclasses | 27 direct ones by grep, plus 5 indirect via `PersistenceXmlRefactoring` |
+| `outline` CasualDiff (6,558 lines) | 0.8 | first 25 members | |
+| `find_usages` ElementHandle | 43.9 | 1,952 usages in 320 files | |
+| `diagnostics` whole workspace | 1.0 | 1 error | NetBeans' Ant build fails on the same line (a test importing `javax.annotation.Resource`) |
+| `apply_rule` search `String.length() == 0` | 15.2 | 248 lines in 163 files | 335 lines by grep; the rest are other types, strings and comments (e.g. the two in `java.mcp.server` are rule examples in string literals) |
+| `rename` Json#string to text | 2.0 | 10 files changed | no call of the old name left; `diagnostics` afterwards unchanged |
+
+Found on the way: a NetBeans installation with the ergonomics cluster (every full IDE; also the
+`basic` build) disables this module until the IDE's UI asks for it, so `--start-mcp-server` was an
+unknown option. `nb-mcp` now starts NetBeans without the ergonomics cluster.
+
+## 2026-09-30: agent with vs. without the server on NetBeans' `java/` folder
+
+Tasks in `nb-tasks/`, run with `run.sh --repo <clone> --workspace java` (3 repetitions, `$3` cap per
+session, model `claude-opus-5-5`). The server was started by each session (warm index, see below).
+
+| Task | Mode | Correct | Turns | Tokens | Cost (USD) | Seconds |
+|---|---|---|---|---|---|---|
+| 01 find the 29 callers of `JavaRefactoringUtils#getClasspathInfoFor` (grep for the name: 65 lines) | baseline | 3/3 | 6.0 | 170,553 | 0.202 | 36 |
+| | netbeans | 2/2 * | 5.0 | 134,240 | 0.160 | 47 |
+| 02 find the 32 subclasses of `JavaRefactoringPlugin` (5 indirect) | baseline | 3/3 | 7.7 | 198,013 | 0.245 | 42 |
+| | netbeans | 3/3 | 6.3 | 170,393 | 0.156 | 56 |
+| 03 rename that method in 22 files, not the same-named internal ones | baseline | 3/3 | 51.3 | 357,632 | 0.559 | 111 |
+| | netbeans | 3/3 | 9.0 | 247,328 | 0.220 | 141 |
+| **all** | baseline | 9/9 | 21.7 | 242,066 | 0.335 | 63 |
+| | netbeans | 8/8 | 7.0 | 190,205 | 0.181 | 86 |
+
+\* One more session was correct too but is left out: the Mac went to idle sleep one second after the
+server was started (power log: 543 s asleep, the same 543 s after which Claude Code reported the
+connection timeout), so the agent worked with grep only and took 1,059 s. `run.sh` now keeps the
+machine awake with `caffeinate -i`.
+
+Observations:
+
+* Every session was correct in both modes. On this code base, too, grep suffices for lookups: the
+  names are distinctive, the baseline agent filters the same-named methods itself.
+* With the server: 21% fewer tokens, 46% lower cost, 68% fewer turns. The difference is the
+  refactoring: without the server the agent reads and edits each of the 22 files (51 turns); with it,
+  one `rename` call (9 turns, 61% cheaper).
+* Wall-clock time is still worse with the server (86 vs. 63 s), because each session starts NetBeans
+  and a refactoring waits for the index check after startup (~100 s on this folder). Read tools no
+  longer wait (see below); a server that keeps running between sessions would remove the rest.
+
+An earlier run (1 repetition) failed the rename with the server: tool calls waited only 60 s for
+the workspace, NetBeans needed 105 s after a restart (it re-checks 1,129 source roots, 80 s of it the
+workspace's own 272 roots, with no changed file), and the agent gave up while waiting. Since then read
+tools answer at once from the previous run's index during that check (their answer says so),
+refactorings wait up to 5 minutes, and `run.sh` allows long tool calls (`MCP_TOOL_TIMEOUT`).

@@ -110,6 +110,20 @@ runs themselves need the user's go-ahead (they use their Claude Code login and c
 - JDK detection must require `<home>/release`: macOS `/usr/bin/java` and `javac` are stubs, so `/usr`
   passed a "has bin/java and bin/javac" test.
 - smoke.sh starts the server through `nb-mcp`, so the launcher is tested on every run.
+- Features on Demand: with the `ergonomics` cluster (every full IDE, `cluster.config=basic` and up), its
+  `config/Modules` override disables most modules, this one and java.lsp.server included, so
+  `--start-mcp-server` is an unknown option. `nb-mcp` passes the clusters of `etc/netbeans.clusters`
+  without ergonomics as `--clusters` (the launcher's own comes first, the last one wins), like nbcode.
+- Warm restarts: NetBeans re-checks all source roots at startup (NetBeans' `java/`: 1,129 roots incl.
+  dependency sources, 92 s, 80 s of them the workspace's own 272 roots, 0 changed files). One session
+  per server start made agents give up while waiting. `Workspace` now completes `opened` before the
+  scan and `scanned` after it; a marker in the cache dir (`nb-mcp/indexed`, gone with the cache) says
+  the index is warm. `Freshness.INDEXED` calls (read tools) then answer during the check and
+  `WorkspaceTool` appends a note; `Freshness.CURRENT` calls (refactorings, diagnostics, rewrite rules)
+  wait. Waits are up to 5 minutes. The refactoring API itself does not block during scans (only the
+  IDE's UI waits), so reads during the check work.
+- NetBeans' own `java/` folder (158 module projects, ~8,900 files; needs the apisupport cluster):
+  ready after 6 minutes from an empty index; results in `test/eval/RESULTS.md`, all cross-checked.
 - `test/eval`: fixture.sh (two-module project, compiles with plain javac, no dependencies), four tasks
   with prompt.md (license header stripped by run.sh) and check.sh, run.sh (claude -p, baseline vs.
   netbeans, fixed work path so the index stays warm, `warmup.py` before the timed runs),
