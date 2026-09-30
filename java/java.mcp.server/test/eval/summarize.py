@@ -22,7 +22,7 @@ import statistics
 import sys
 
 COLUMNS = ["task", "mode", "rep", "result", "turns", "tokens", "output_tokens", "cost_usd", "seconds",
-           "tool_calls", "mcp_calls", "mcp_errors", "mcp_status", "model", "tools"]
+           "tool_calls", "mcp_calls", "mcp_errors", "mcp_status", "model", "tools", "stop"]
 
 
 def numbers(rows, key):
@@ -83,6 +83,10 @@ for mode, rows in by_mode.items():
 models = sorted({r.get("model", "") for rows in runs.values() for r in rows} - {""})
 print()
 print("Model: %s" % (", ".join(models) or "unknown"))
+stopped = [r for rows in runs.values() for r in rows if r.get("stop", "success") != "success"]
+if stopped:
+    print("NOTE: %d session(s) did not end normally: %s" % (
+        len(stopped), ", ".join("%s %s rep %s (%s)" % (r["task"], r["mode"], r["rep"], r.get("stop")) for r in stopped)))
 disconnected = [r for rows in runs.values() for r in rows
                 if r["mode"] != "baseline" and "=connected" not in r.get("mcp_status", "")]
 if disconnected:

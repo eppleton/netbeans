@@ -64,4 +64,4 @@ tools = " ".join("%s:%d" % (name.replace("mcp__netbeans__", "nb."), n) for name,
 print("\t".join(map(str, [task, mode, rep, "pass" if status == "0" else "FAIL",
                           result.get("num_turns", ""), tokens, usage.get("output_tokens", ""),
                           result.get("total_cost_usd", ""), wall, sum(calls.values()), mcp_calls,
-                          mcp_errors, mcp_status, model, tools or "-"])))
+                          mcp_errors, mcp_status, model, tools or "-", result.get("subtype", "none")])))

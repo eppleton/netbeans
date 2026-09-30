@@ -26,11 +26,21 @@
 # THIS USES YOUR CLAUDE CODE LOGIN AND COSTS TOKENS: every run is a real session.
 #
 # Usage: run.sh [--reps N] [--model M] [--modes baseline,netbeans] [--tasks GLOB]
-#               [--nb-mcp PATH]
+#               [--nb-mcp PATH] [--budget USD] [--tasks-dir DIR]
+#               [--repo DIR --workspace SUBDIR]
+#   --budget     spending cap per session (claude --max-budget-usd), default 3
+#   --repo       run on an existing git checkout instead of the generated fixture; the
+#                workspace SUBDIR must have no uncommitted changes and is reset with
+#                git checkout/clean before every session (use a clone, not your checkout)
 # Environment: EVAL_DIR work and result directory (default ${TMPDIR:-/tmp}/nbmcp-eval)
 # Needs: claude, python3, git, javac
 
 set -u
+
+# keep the machine awake: an idle-sleeping Mac stalled a session and the MCP startup
+if [ -z "${NB_MCP_EVAL_AWAKE:-}" ] && command -v caffeinate > /dev/null; then
+    NB_MCP_EVAL_AWAKE=1 exec caffeinate -i "$0" "$@"
+fi
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../../.." && pwd)
@@ -40,6 +50,10 @@ MODEL=
 MODES=baseline,netbeans
 TASKS='*'
 NB_MCP=$REPO/nbbuild/netbeans/java/bin/nb-mcp
+BUDGET=3
+TASKS_DIR=$HERE/tasks
+GIT_REPO=
+GIT_WORKSPACE=
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -48,6 +62,10 @@ while [ $# -gt 0 ]; do
         --modes) MODES=$2; shift 2 ;;
         --tasks) TASKS=$2; shift 2 ;;
         --nb-mcp) NB_MCP=$2; shift 2 ;;
+        --budget) BUDGET=$2; shift 2 ;;
+        --tasks-dir) TASKS_DIR=$(cd "$2" && pwd); shift 2 ;;
+        --repo) GIT_REPO=$(cd "$2" && pwd); shift 2 ;;
+        --workspace) GIT_WORKSPACE=$2; shift 2 ;;
         *) echo "unknown argument $1" >&2; exit 2 ;;
     esac
 done
@@ -56,8 +74,17 @@ for tool in claude python3 git javac; do
 done
 [ -x "$NB_MCP" ] || { echo "no nb-mcp at $NB_MCP (build the module or use --nb-mcp)" >&2; exit 2; }
 
-# always the same path, so the NetBeans index of the project stays warm between runs
-WORK=$EVAL_DIR/work/project
+if [ -n "$GIT_REPO" ]; then
+    [ -n "$GIT_WORKSPACE" ] && [ -d "$GIT_REPO/$GIT_WORKSPACE" ] || { echo "--repo needs --workspace <subdir>" >&2; exit 2; }
+    if [ -n "$(git -C "$GIT_REPO" status --porcelain -- "$GIT_WORKSPACE")" ]; then
+        echo "$GIT_REPO/$GIT_WORKSPACE has uncommitted changes; refusing to reset it" >&2
+        exit 2
+    fi
+    WORK=$GIT_REPO/$GIT_WORKSPACE
+else
+    # always the same path, so the NetBeans index of the project stays warm between runs
+    WORK=$EVAL_DIR/work/project
+fi
 RESULTS=$EVAL_DIR/results/$(date +%Y%m%d-%H%M%S)
 mkdir -p "$RESULTS"
 echo "Results: $RESULTS"
@@ -67,6 +94,13 @@ BASE_TOOLS=(Read Edit Write Glob Grep "Bash(./compile.sh)" "Bash(javac:*)" "Bash
     "Bash(grep:*)" "Bash(find:*)" "Bash(ls:*)" "Bash(cat:*)" "Bash(git diff:*)" "Bash(git status:*)")
 
 fresh_project() {
+    if [ -n "$GIT_REPO" ]; then
+        # back to the committed state (verified clean at start, so only session changes are lost)
+        # (unstage first: the diff of the previous session was recorded with git add)
+        git -C "$GIT_REPO" reset -q -- "$GIT_WORKSPACE" && git -C "$GIT_REPO" checkout -q -- "$GIT_WORKSPACE" \
+            && git -C "$GIT_REPO" clean -fdq -- "$GIT_WORKSPACE"
+        return
+    fi
     "$HERE/fixture.sh" "$WORK" > /dev/null
     (cd "$WORK" && git init -q && git add -A \
         && git -c user.name=eval -c user.email=eval@example.invalid -c commit.gpgsign=false commit -qm fixture)
@@ -88,7 +122,7 @@ if [[ ",$MODES," == *",netbeans,"* ]]; then
     python3 "$HERE/warmup.py" "$NB_MCP" "$EVAL_DIR/nb-data" "$WORK" || { echo "warm-up failed" >&2; exit 1; }
 fi
 
-for task_dir in "$HERE"/tasks/$TASKS/; do
+for task_dir in "$TASKS_DIR"/$TASKS/; do
     task=$(basename "$task_dir")
     # the prompt without its license header
     prompt=$(sed '1,/-->/d' "$task_dir/prompt.md")
@@ -101,10 +135,10 @@ for task_dir in "$HERE"/tasks/$TASKS/; do
             [ "$mode" = netbeans ] && allowed+=(mcp__netbeans)
             args=(-p "$prompt" --output-format stream-json --verbose --no-session-persistence
                 --strict-mcp-config --mcp-config "$(mcp_config "$mode")"
-                --permission-mode acceptEdits --allowedTools "${allowed[@]}")
+                --permission-mode acceptEdits --max-budget-usd "$BUDGET" --allowedTools "${allowed[@]}")
             [ -n "$MODEL" ] && args+=(--model "$MODEL")
             start=$(date +%s)
-            (cd "$WORK" && MCP_TIMEOUT=120000 claude "${args[@]}" > "$RESULTS/$run.jsonl" 2> "$RESULTS/$run.stderr")
+            (cd "$WORK" && MCP_TIMEOUT=120000 MCP_TOOL_TIMEOUT=600000 claude "${args[@]}" > "$RESULTS/$run.jsonl" 2> "$RESULTS/$run.stderr")
             end=$(date +%s)
             check=$(cd "$WORK" && bash "$task_dir/check.sh" 2>&1)
             status=$?
