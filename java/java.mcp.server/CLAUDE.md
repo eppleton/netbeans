@@ -55,8 +55,9 @@ Learned on the way:
 - Line numbers of declarations are the start of the declaration including annotations (`@Override`
   line). Implicit members (default constructors, ...) have origin `MANDATED` and are shown as `(implicit)`
   without a line.
-- `SourcePositions.getStartPosition(CompilationUnitTree, Tree)` is deprecated in the nb-javac we build
-  against but its replacement is not in the API jar; `SymbolResolver.line` suppresses the warning.
+- `SourcePositions.getStartPosition/getEndPosition(CompilationUnitTree, Tree)` are deprecated; use the
+  one-argument `(Tree)` variants (upstream migrated in #9623). Careful: `javap -cp nb-javac-api.jar
+  com.sun.source...` shows the running JDK's own class, not the jar's; extract the class file to check.
 
 **M2 done** (`rename`, option (a): public API only). Findings:
 - Lookup like `TextDocumentServiceImpl.rename`: the `TreePathHandle`, plus the `FileObject` for a top-level

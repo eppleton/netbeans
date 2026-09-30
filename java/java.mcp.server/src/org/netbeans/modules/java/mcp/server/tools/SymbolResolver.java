@@ -18,7 +18,6 @@
  */
 package org.netbeans.modules.java.mcp.server.tools;
 
-import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.Tree;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -178,28 +177,22 @@ final class SymbolResolver {
      * Line (1-based) where an element is declared in the compilation unit of
      * {@code info}, or 0 if it has no source position there.
      */
-    // the replacement of getStartPosition(CompilationUnitTree, Tree) is not in the javac API we build against
-    @SuppressWarnings("deprecation")
     static int line(CompilationInfo info, Element e) {
         Tree tree = info.getTrees().getTree(e);
         if (tree == null) {
             return 0;
         }
-        CompilationUnitTree cu = info.getCompilationUnit();
-        long pos = info.getTrees().getSourcePositions().getStartPosition(cu, tree);
-        return pos < 0 ? 0 : (int) cu.getLineMap().getLineNumber(pos);
+        long pos = info.getTrees().getSourcePositions().getStartPosition(tree);
+        return pos < 0 ? 0 : (int) info.getCompilationUnit().getLineMap().getLineNumber(pos);
     }
 
     /**
      * Start and end offset of a tree in the compilation unit of {@code info},
      * or {@code null} if it has no source position.
      */
-    // the replacements of the (CompilationUnitTree, Tree) methods are not in the javac API we build against
-    @SuppressWarnings("deprecation")
     static int[] span(CompilationInfo info, Tree tree) {
-        CompilationUnitTree cu = info.getCompilationUnit();
-        long start = info.getTrees().getSourcePositions().getStartPosition(cu, tree);
-        long end = info.getTrees().getSourcePositions().getEndPosition(cu, tree);
+        long start = info.getTrees().getSourcePositions().getStartPosition(tree);
+        long end = info.getTrees().getSourcePositions().getEndPosition(tree);
         return start < 0 || end < start ? null : new int[]{(int) start, (int) end};
     }
 
